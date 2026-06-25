@@ -14,6 +14,7 @@ export type Student = {
 export type ImportedRow = {
   id: string
   rowNo: number
+  sourceLabel?: string
   raw: Record<string, unknown>
   classValue: string
   seatNo: string

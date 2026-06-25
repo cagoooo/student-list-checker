@@ -1,4 +1,5 @@
 export const ROW_NUMBER_KEY = '__rowNo'
+export const SOURCE_LOCATION_KEY = '__source'
 
 export const digitAliases: Record<string, string> = {
   一: '1',

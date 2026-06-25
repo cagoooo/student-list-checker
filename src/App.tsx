@@ -454,6 +454,7 @@ function App() {
                 <tr>
                   <th>狀態</th>
                   <th>列號</th>
+                  <th>來源</th>
                   <th>原始班級</th>
                   <th>原始座號</th>
                   <th>原始姓名</th>
@@ -469,6 +470,7 @@ function App() {
                       <StatusBadge status={result.status} />
                     </td>
                     <td>{result.rowNo}</td>
+                    <td>{result.sourceLabel || '—'}</td>
                     <td>{result.classValue || '未填'}</td>
                     <td>{result.seatNo || '未填'}</td>
                     <td>{result.name || '未填'}</td>

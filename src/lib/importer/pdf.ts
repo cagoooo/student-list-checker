@@ -1,19 +1,23 @@
 import type { CandidateTable } from './types'
-import { findHeaderRow, normalizeHeaders, toRecord } from './excel'
-import { toText } from './normalize'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
+import { tablesFromTextLines, tablesFromTextRows, type TextRow } from './textTable'
+
+export { tablesFromTextLines, tablesFromTextRows }
 
 type PdfTextItem = {
   str: string
   transform: number[]
+  width?: number
 }
+
+const PDF_TABLE_OPTIONS = { idPrefix: 'pdf', sheetName: 'PDF 文字表格' }
 
 export async function parsePdfTables(file: File): Promise<CandidateTable[]> {
   const pdfjs = await import('pdfjs-dist')
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
   const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise
-  const lines: string[] = []
+  const rows: TextRow[] = []
 
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber)
@@ -22,68 +26,55 @@ export async function parsePdfTables(file: File): Promise<CandidateTable[]> {
     content.items.forEach((item) => {
       if (isPdfTextItem(item)) textItems.push(item)
     })
-    lines.push(...textItemsToLines(textItems))
+    rows.push(...textItemsToRows(textItems, pageNumber))
   }
 
-  return tablesFromTextLines(lines, file.name)
+  return tablesFromTextRows(rows, file.name, PDF_TABLE_OPTIONS)
 }
 
-export function tablesFromTextLines(lines: string[], sourceName: string): CandidateTable[] {
-  const parsedRows = lines
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.split(/\s{1,}|\t/).filter(Boolean))
-    .filter((row) => row.length >= 3)
+type PositionedItem = { text: string; x: number; y: number; width: number }
 
-  if (parsedRows.length === 0) return []
-
-  const headerIndex = findHeaderRow(parsedRows)
-  const headers = normalizeHeaders(parsedRows[headerIndex] ?? [])
-  const rows = parsedRows
-    .slice(headerIndex + 1)
-    .map((row, index) => toRecord(row, headers, headerIndex + index + 2))
-    .filter((row) =>
-      Object.entries(row)
-        .filter(([key]) => !key.startsWith('__'))
-        .some(([, value]) => toText(value) !== ''),
-    )
-
-  return [
-    {
-      id: 'pdf-text-table-1',
-      sourceName,
-      sheetName: 'PDF 文字表格',
-      headerRow: headerIndex + 1,
-      headers,
-      rows,
-      rowCount: rows.length,
-    },
-  ]
-}
-
-function textItemsToLines(items: PdfTextItem[]) {
-  const sortedItems = items
-    .map((item) => ({ text: item.str.trim(), x: item.transform[4] ?? 0, y: item.transform[5] ?? 0 }))
+export function textItemsToRows(items: PdfTextItem[], page: number): TextRow[] {
+  const positioned: PositionedItem[] = items
+    .map((item) => ({
+      text: item.str.trim(),
+      x: item.transform[4] ?? 0,
+      y: item.transform[5] ?? 0,
+      width: item.width ?? 0,
+    }))
     .filter((item) => item.text !== '')
+
+  const lines: Array<{ y: number; items: PositionedItem[] }> = []
+  positioned
     .sort((a, b) => b.y - a.y || a.x - b.x)
+    .forEach((item) => {
+      const line = lines.find((current) => Math.abs(current.y - item.y) <= 4)
+      if (line) {
+        line.items.push(item)
+        return
+      }
+      lines.push({ y: item.y, items: [item] })
+    })
 
-  const lines: Array<{ y: number; items: Array<{ text: string; x: number }> }> = []
-  sortedItems.forEach((item) => {
-    const line = lines.find((current) => Math.abs(current.y - item.y) <= 4)
-    if (line) {
-      line.items.push({ text: item.text, x: item.x })
-      return
-    }
+  return lines.map((line) => ({ text: joinLineItems(line.items), page }))
+}
 
-    lines.push({ y: item.y, items: [{ text: item.text, x: item.x }] })
-  })
+// 用文字項寬度估每個字的平均寬度，若兩個相鄰文字項之間的空隙明顯大於字寬，
+// 視為欄位分隔，插入 tab，讓多欄版面能正確切欄。
+function joinLineItems(items: PositionedItem[]): string {
+  const sorted = items.sort((a, b) => a.x - b.x)
+  const totalWidth = sorted.reduce((sum, item) => sum + item.width, 0)
+  const totalChars = sorted.reduce((sum, item) => sum + Math.max(item.text.length, 1), 0)
+  const avgCharWidth = totalChars > 0 ? totalWidth / totalChars : 0
 
-  return lines.map((line) =>
-    line.items
-      .sort((a, b) => a.x - b.x)
-      .map((item) => item.text)
-      .join(' '),
-  )
+  return sorted.reduce((text, item, index) => {
+    if (index === 0) return item.text
+    const prev = sorted[index - 1]
+    const gap = item.x - (prev.x + prev.width)
+    const columnGap = avgCharWidth > 0 ? avgCharWidth * 1.5 : 6
+    const separator = gap > columnGap ? '\t' : ' '
+    return text + separator + item.text
+  }, '')
 }
 
 function isPdfTextItem(item: unknown): item is PdfTextItem {

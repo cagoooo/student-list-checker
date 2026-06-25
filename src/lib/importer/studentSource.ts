@@ -1,6 +1,6 @@
 import type { ColumnMap, ImportedRow, Student } from '../../types'
 import type { CandidateTable } from './types'
-import { ROW_NUMBER_KEY, classOrder, normalizeName, normalizeSeat, toDigit, toText } from './normalize'
+import { ROW_NUMBER_KEY, SOURCE_LOCATION_KEY, classOrder, normalizeName, normalizeSeat, toDigit, toText } from './normalize'
 
 export function buildImportedRows(data: Record<string, unknown>[], map?: ColumnMap): ImportedRow[] {
   const detected = map ?? {}
@@ -10,9 +10,11 @@ export function buildImportedRows(data: Record<string, unknown>[], map?: ColumnM
 export function hydrateRow(raw: Record<string, unknown>, rowNo: number, map: ColumnMap): ImportedRow {
   const gradeValue = toText(raw[map.gradeKey ?? ''])
   const classValue = toText(raw[map.classKey ?? ''])
+  const sourceLabel = toText(raw[SOURCE_LOCATION_KEY]) || undefined
   return {
     id: `${rowNo}-${JSON.stringify(raw)}`,
     rowNo,
+    sourceLabel,
     raw,
     classValue: gradeValue && classValue ? `${gradeValue}年${classValue}班` : classValue,
     seatNo: normalizeSeat(toText(raw[map.seatKey ?? ''])),
