@@ -5,6 +5,9 @@
 }
 
 .update-banner {
+  position: sticky;
+  top: 0;
+  z-index: 40;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -13,6 +16,7 @@
   padding: 10px 16px;
   background: #1d704d;
   color: #ffffff;
+  box-shadow: 0 8px 18px rgba(17, 24, 39, 0.12);
   font-size: 14px;
   font-weight: 700;
 }
