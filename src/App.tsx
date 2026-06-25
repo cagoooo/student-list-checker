@@ -31,7 +31,7 @@ import {
   normalizeName,
   parseStudentsFromTable,
 } from './lib/importer/studentSource'
-import type { CandidateTable } from './lib/importer/types'
+import type { CandidateTable, ImportDetectionResult } from './lib/importer/types'
 import { applyServiceWorkerUpdate, registerServiceWorker } from './lib/registerSW'
 import type { ColumnMap, DatabaseMode, ImportedRow, Student, ValidationResult, ValidationStatus } from './types'
 import './App.css'
@@ -55,6 +55,7 @@ function App() {
   const [fileName, setFileName] = useState('範例名單.xlsx')
   const [rows, setRows] = useState<ImportedRow[]>(() => buildImportedRows(SAMPLE_ROWS))
   const [columnMap, setColumnMap] = useState<ColumnMap>(() => detectColumns(Object.keys(SAMPLE_ROWS[0])))
+  const [importDetection, setImportDetection] = useState<ImportDetectionResult | null>(null)
   const [message, setMessage] = useState(
     `已載入 ${DEFAULT_STUDENTS.length} 位學生資料，可直接測試校對與修正流程。`,
   )
@@ -106,6 +107,7 @@ function App() {
       const warningMessage = imported.fieldDetection.warnings.join('；')
 
       if (!imported.selectedTable || imported.importedRows.length === 0) {
+        setImportDetection(imported)
         setMessage(warningMessage || '找不到可辨識的名單資料，請確認檔案內含班級、座號與姓名。')
         return
       }
@@ -118,6 +120,7 @@ function App() {
 
       setRows(imported.importedRows)
       setColumnMap(imported.fieldDetection.columnMap)
+      setImportDetection(imported)
       setFileName(file.name)
       setMessage(
         imported.isOfficialStudentSource
@@ -318,6 +321,19 @@ function App() {
             <h2>欄位對應</h2>
             <p>系統會先自動判斷欄位，若老師檔案欄名不同，可在這裡手動指定。</p>
           </div>
+          {importDetection ? (
+            <div className={`detection-summary confidence-${confidenceTone(importDetection.fieldDetection.confidence)}`}>
+              <strong>自動辨識信心 {importDetection.fieldDetection.confidence}%</strong>
+              <span>
+                {importDetection.selectedTable?.sheetName
+                  ? `${importDetection.selectedTable.sheetName}，第 ${importDetection.selectedTable.headerRow} 列作為欄位列`
+                  : '尚未找到可判讀表格'}
+              </span>
+              {importDetection.fieldDetection.warnings.map((warning) => (
+                <span key={warning}>{warning}</span>
+              ))}
+            </div>
+          ) : null}
           <ColumnSelect
             label="班級欄位"
             value={columnMap.classKey}
@@ -374,6 +390,7 @@ function App() {
               className="ghost-button"
               onClick={() => {
                 setRows(buildImportedRows(SAMPLE_ROWS, columnMap))
+                setImportDetection(null)
                 setFileName('範例名單.xlsx')
               }}
             >
@@ -540,11 +557,22 @@ function parsePrimaryExcelTable(buffer: ArrayBuffer, sourceName: string): Candid
 }
 
 function buildImportMessage(fileName: string, rowCount: number, confidence: number, reasons: string[], warning?: string) {
+  const detectionNote =
+    confidence >= 85
+      ? '系統已自動完成欄位辨識。'
+      : '系統已先推測欄位，請確認左側欄位對應後再使用校對結果。'
+
   if (confidence >= 85) {
-    return `已讀取 ${fileName}，共 ${rowCount} 筆資料。${reasons.join('，')}。`
+    return `已讀取 ${fileName}，共 ${rowCount} 筆資料。${detectionNote}${reasons.join('，')}。`
   }
 
-  return `已讀取 ${fileName}，共 ${rowCount} 筆資料，但欄位由系統推測，請確認左側欄位對應。${warning ? ` ${warning}` : ''}`
+  return `已讀取 ${fileName}，共 ${rowCount} 筆資料。${detectionNote}${warning ? ` ${warning}` : ''}`
+}
+
+function confidenceTone(confidence: number) {
+  if (confidence >= 85) return 'high'
+  if (confidence >= 60) return 'medium'
+  return 'low'
 }
 
 function validateRow(row: ImportedRow, students: Student[]): ValidationResult {

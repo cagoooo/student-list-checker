@@ -308,6 +308,38 @@ h2 {
   gap: 8px;
 }
 
+.detection-summary {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #c8d4de;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.detection-summary strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.confidence-high {
+  border-color: #9fd5ba;
+  background: #eefaf4;
+}
+
+.confidence-medium {
+  border-color: #f0cf8b;
+  background: #fff9eb;
+}
+
+.confidence-low {
+  border-color: #efb0aa;
+  background: #fff5f4;
+}
+
 .field span {
   color: #374151;
   font-size: 14px;
