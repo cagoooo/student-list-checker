@@ -27,6 +27,7 @@ import './App.css'
 
 const DEFAULT_STUDENTS = studentsData.students as Student[]
 const STUDENT_STORAGE_KEY = 'smes-student-database'
+const ROW_NUMBER_KEY = '__rowNo'
 
 const SAMPLE_ROWS = [
   { 班級: '1年1班', 座號: '1', 姓名: '示範學生001', 項目: '閱讀獎' },
@@ -118,20 +119,19 @@ function App() {
 
     try {
       const buffer = await file.arrayBuffer()
-      const workbook = XLSX.read(buffer, { type: 'array' })
-      const sheet = workbook.Sheets[workbook.SheetNames[0]]
-      const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
+      const imported = parseImportedWorkbook(buffer)
 
-      if (data.length === 0) {
-        setMessage('檔案裡沒有可辨識的資料列，請確認第一列包含欄位名稱。')
+      if (imported.rows.length === 0) {
+        setMessage('檔案沒有可判讀的學生資料，請確認 Excel / CSV 內含班級、座號、姓名欄位。')
         return
       }
 
-      const detected = detectColumns(Object.keys(data[0]))
-      setRows(buildImportedRows(data, detected))
-      setColumnMap(detected)
+      setRows(buildImportedRows(imported.rows, imported.columnMap))
+      setColumnMap(imported.columnMap)
       setFileName(file.name)
-      setMessage(`已讀取 ${file.name}，共 ${data.length} 筆資料。`)
+      setMessage(
+        `已讀取 ${file.name}，共 ${imported.rows.length} 筆資料。已自動使用第 ${imported.headerRow} 列作為欄位列。`,
+      )
     } catch {
       setMessage('檔案讀取失敗，請確認格式為 .xlsx、.xls 或 .csv。')
     } finally {
@@ -526,27 +526,23 @@ function loadStoredStudents() {
 }
 
 function parseStudentDatabase(buffer: ArrayBuffer): Student[] {
-  const workbook = XLSX.read(buffer, { type: 'array' })
-  const sheet = workbook.Sheets[workbook.SheetNames[0]]
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-    header: 1,
-    defval: '',
-    raw: false,
-  })
-  const dataRows = rows.slice(3).filter((row) => row.some((cell) => toText(cell) !== ''))
-  const students = dataRows
+  const imported = parseImportedWorkbook(buffer)
+  const students = imported.rows
     .map((row): Student | null => {
-      const name = toText(row[0])
-      const studentNo = toText(row[1])
-      const grade = Number(toText(row[2]))
-      const gender = toText(row[3])
-      const classNo = Number(toText(row[4]))
-      const seatNumber = Number(toText(row[5]))
+      const name = normalizeName(toText(row[imported.columnMap.nameKey ?? '']))
+      const classParts = parseClassParts(
+        toText(row[imported.columnMap.classKey ?? '']),
+        toText(row[imported.columnMap.gradeKey ?? '']),
+      )
+      const seatNumber = Number(toText(row[imported.columnMap.seatKey ?? '']))
+      const studentNo = toText(row['學號'])
+      const gender = toText(row['性別'])
 
-      if (!name || !Number.isFinite(grade) || !Number.isFinite(classNo) || !Number.isFinite(seatNumber)) {
+      if (!name || !classParts || !Number.isFinite(seatNumber)) {
         return null
       }
 
+      const { grade, classNo } = classParts
       const seatNo = String(seatNumber).padStart(2, '0')
       const classCode = `${grade}${String(classNo).padStart(2, '0')}`
       return {
@@ -570,17 +566,82 @@ function parseStudentDatabase(buffer: ArrayBuffer): Student[] {
   return students
 }
 
+function parseImportedWorkbook(buffer: ArrayBuffer) {
+  const workbook = XLSX.read(buffer, { type: 'array' })
+  const sheet = workbook.Sheets[workbook.SheetNames[0]]
+  const sheetRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    defval: '',
+    raw: false,
+  })
+  const headerIndex = findHeaderRow(sheetRows)
+  const headers = normalizeHeaders(sheetRows[headerIndex] ?? [])
+  const columnMap = detectColumns(headers)
+  const rows = sheetRows
+    .slice(headerIndex + 1)
+    .map((row, index) => toRecord(row, headers, headerIndex + index + 2))
+    .filter((row) => visibleValues(row).some((value) => toText(value) !== ''))
+
+  return {
+    rows,
+    columnMap,
+    headerRow: headerIndex + 1,
+  }
+}
+
+function findHeaderRow(rows: unknown[][]) {
+  let bestIndex = 0
+  let bestScore = -1
+
+  rows.slice(0, 30).forEach((row, index) => {
+    const headers = normalizeHeaders(row)
+    const detected = detectColumns(headers)
+    const score =
+      (detected.nameKey ? 3 : 0) +
+      (detected.seatKey ? 3 : 0) +
+      (detected.classKey ? 2 : 0) +
+      (detected.gradeKey ? 2 : 0)
+
+    if (score > bestScore) {
+      bestIndex = index
+      bestScore = score
+    }
+  })
+
+  return bestIndex
+}
+
+function normalizeHeaders(row: unknown[]) {
+  const used = new Map<string, number>()
+  return row.map((cell, index) => {
+    const base = toText(cell).replace(/\s+/g, '') || `欄位${index + 1}`
+    const count = used.get(base) ?? 0
+    used.set(base, count + 1)
+    return count === 0 ? base : `${base}_${count + 1}`
+  })
+}
+
+function toRecord(row: unknown[], headers: string[], rowNo: number): Record<string, unknown> {
+  const record: Record<string, unknown> = { [ROW_NUMBER_KEY]: rowNo }
+  headers.forEach((header, index) => {
+    record[header] = row[index] ?? ''
+  })
+  return record
+}
+
 function buildImportedRows(data: Record<string, unknown>[], map?: ColumnMap): ImportedRow[] {
   const detected = map ?? detectColumns(Object.keys(data[0] ?? {}))
-  return data.map((raw, index) => hydrateRow(raw, index + 2, detected))
+  return data.map((raw, index) => hydrateRow(raw, Number(raw[ROW_NUMBER_KEY]) || index + 2, detected))
 }
 
 function hydrateRow(raw: Record<string, unknown>, rowNo: number, map: ColumnMap): ImportedRow {
+  const gradeValue = toText(raw[map.gradeKey ?? ''])
+  const classValue = toText(raw[map.classKey ?? ''])
   return {
     id: `${rowNo}-${JSON.stringify(raw)}`,
     rowNo,
     raw,
-    classValue: toText(raw[map.classKey ?? '']),
+    classValue: gradeValue && classValue ? `${gradeValue}年${classValue}班` : classValue,
     seatNo: normalizeSeat(toText(raw[map.seatKey ?? ''])),
     name: normalizeName(toText(raw[map.nameKey ?? ''])),
   }
@@ -596,13 +657,13 @@ function applyStudentToRaw(raw: Record<string, unknown>, student: Student, map: 
 }
 
 function detectColumns(headers: string[]): ColumnMap {
-  const find = (patterns: RegExp[]) =>
-    headers.find((header) => patterns.some((pattern) => pattern.test(header.trim())))
+  const find = (patterns: RegExp[]) => headers.find((header) => patterns.some((pattern) => pattern.test(header)))
 
   return {
-    classKey: find([/班級|班別|班$/i, /class/i]),
-    seatKey: find([/座號|號碼|座位|號$/i, /seat|number/i]),
-    nameKey: find([/姓名|學生|名字|姓名$/i, /name/i]),
+    classKey: find([/^\u73ed\u7d1a$/, /\u73ed\u5225|\u73ed\u5e8f|\u73ed\u7d1a\u540d\u7a31|class/i]),
+    gradeKey: find([/^\u5e74\u7d1a$/, /\u5c31\u8b80\u5e74\u7d1a|grade/i]),
+    seatKey: find([/^\u5ea7\u865f$/, /\u5ea7\u865f\u78bc|\u5ea7\u6b21|seat/i]),
+    nameKey: find([/^\u5b78\u751f\u59d3\u540d$/, /^\u59d3\u540d$/, /\u5b78\u751f.*\u59d3\u540d|\u59d3\u540d|name/i]),
   }
 }
 
@@ -685,7 +746,13 @@ function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
 }
 
 function collectHeaders(rows: ImportedRow[]) {
-  return Array.from(new Set(rows.flatMap((row) => Object.keys(row.raw))))
+  return Array.from(new Set(rows.flatMap((row) => Object.keys(row.raw).filter((key) => !key.startsWith('__')))))
+}
+
+function visibleValues(row: Record<string, unknown>) {
+  return Object.entries(row)
+    .filter(([key]) => !key.startsWith('__'))
+    .map(([, value]) => value)
 }
 
 function summarize(results: ValidationResult[]) {
@@ -716,6 +783,24 @@ function normalizeClass(value: string) {
   }
 
   return compact
+}
+
+function parseClassParts(classValue: string, gradeValue?: string) {
+  const grade = Number(toDigit(toText(gradeValue ?? '').replace(/[^\d一二三四五六七八九]/g, '')))
+  const classNo = Number(toDigit(classValue.replace(/[^\d一二三四五六七八九]/g, '')))
+  if (Number.isFinite(grade) && grade > 0 && Number.isFinite(classNo) && classNo > 0) {
+    return { grade, classNo }
+  }
+
+  const classCode = normalizeClass(classValue)
+  if (/^\d{3}$/.test(classCode)) {
+    return {
+      grade: Number(classCode.slice(0, 1)),
+      classNo: Number(classCode.slice(1)),
+    }
+  }
+
+  return null
 }
 
 function toDigit(value: string) {

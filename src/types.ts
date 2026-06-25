@@ -31,6 +31,7 @@ export type ValidationResult = ImportedRow & {
 
 export type ColumnMap = {
   classKey?: string
+  gradeKey?: string
   seatKey?: string
   nameKey?: string
 }
