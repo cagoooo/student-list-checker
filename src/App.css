@@ -4,6 +4,40 @@
   color: #1f2937;
 }
 
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 10px 16px;
+  background: #1d704d;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.update-banner span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.update-banner button {
+  padding: 4px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1d704d;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.update-banner button:hover {
+  background: #e9f7ef;
+}
+
 .topbar {
   display: flex;
   align-items: center;

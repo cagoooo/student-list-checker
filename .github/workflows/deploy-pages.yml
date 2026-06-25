@@ -41,6 +41,16 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
 
+      - name: Inject Service Worker build version
+        run: |
+          BUILD_VERSION="$(git rev-parse --short HEAD)-$(date -u +%Y%m%d%H%M)"
+          sed -i "s/__BUILD_VERSION__/${BUILD_VERSION}/g" dist/sw.js
+          echo "✓ sw.js BUILD_VERSION 已注入：${BUILD_VERSION}"
+          if grep -q '__BUILD_VERSION__' dist/sw.js; then
+            echo "::error::dist/sw.js 仍有未替換的 __BUILD_VERSION__"
+            exit 1
+          fi
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:

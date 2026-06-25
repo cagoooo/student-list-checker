@@ -20,6 +20,7 @@ import {
   signOutFirebase,
   subscribeCurrentUser,
 } from './lib/firebase'
+import { applyServiceWorkerUpdate, registerServiceWorker } from './lib/registerSW'
 import type { ColumnMap, DatabaseMode, ImportedRow, Student, ValidationResult, ValidationStatus } from './types'
 import './App.css'
 
@@ -64,6 +65,11 @@ function App() {
   const [message, setMessage] = useState(
     `已載入 ${DEFAULT_STUDENTS.length} 位學生資料，可直接測試校對與修正流程。`,
   )
+  const [updateReady, setUpdateReady] = useState(false)
+
+  useEffect(() => {
+    registerServiceWorker(() => setUpdateReady(true))
+  }, [])
 
   const headers = useMemo(() => collectHeaders(rows), [rows])
   const results = useMemo(() => rows.map((row) => validateRow(row, students)), [rows, students])
@@ -232,6 +238,17 @@ function App() {
 
   return (
     <main className="app-shell">
+      {updateReady ? (
+        <div className="update-banner" role="status">
+          <span>
+            <RefreshCw size={16} />
+            平台已更新新版本
+          </span>
+          <button type="button" onClick={applyServiceWorkerUpdate}>
+            立刻更新
+          </button>
+        </div>
+      ) : null}
       <header className="topbar">
         <div>
           <p className="eyebrow">桃園市龍潭區石門國民小學</p>
