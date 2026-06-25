@@ -120,17 +120,31 @@ function App() {
     try {
       const buffer = await file.arrayBuffer()
       const imported = parseImportedWorkbook(buffer)
+      const sourceStudents = parseStudentsFromImported(imported)
+      const isStudentSourceFile =
+        sourceStudents.length > 0 &&
+        sourceStudents.length === imported.rows.length &&
+        hasHeader(imported.headers, /\u5b78\u865f/) &&
+        hasHeader(imported.headers, /\u6027\u5225/)
 
       if (imported.rows.length === 0) {
         setMessage('檔案沒有可判讀的學生資料，請確認 Excel / CSV 內含班級、座號、姓名欄位。')
         return
       }
 
+      if (isStudentSourceFile) {
+        setStudents(sourceStudents)
+        localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(sourceStudents))
+        setDatabaseMode('local')
+      }
+
       setRows(buildImportedRows(imported.rows, imported.columnMap))
       setColumnMap(imported.columnMap)
       setFileName(file.name)
       setMessage(
-        `已讀取 ${file.name}，共 ${imported.rows.length} 筆資料。已自動使用第 ${imported.headerRow} 列作為欄位列。`,
+        isStudentSourceFile
+          ? `已偵測 ${file.name} 為學生資料原始檔，共 ${sourceStudents.length} 位學生，已先載入為本機校對基準。`
+          : `已讀取 ${file.name}，共 ${imported.rows.length} 筆資料。已自動使用第 ${imported.headerRow} 列作為欄位列。`,
       )
     } catch {
       setMessage('檔案讀取失敗，請確認格式為 .xlsx、.xls 或 .csv。')
@@ -527,7 +541,17 @@ function loadStoredStudents() {
 
 function parseStudentDatabase(buffer: ArrayBuffer): Student[] {
   const imported = parseImportedWorkbook(buffer)
-  const students = imported.rows
+  const students = parseStudentsFromImported(imported)
+
+  if (students.length === 0) {
+    throw new Error('No students parsed')
+  }
+
+  return students
+}
+
+function parseStudentsFromImported(imported: ReturnType<typeof parseImportedWorkbook>): Student[] {
+  return imported.rows
     .map((row): Student | null => {
       const name = normalizeName(toText(row[imported.columnMap.nameKey ?? '']))
       const classParts = parseClassParts(
@@ -558,12 +582,6 @@ function parseStudentDatabase(buffer: ArrayBuffer): Student[] {
       } satisfies Student
     })
     .filter((student): student is Student => student !== null)
-
-  if (students.length === 0) {
-    throw new Error('No students parsed')
-  }
-
-  return students
 }
 
 function parseImportedWorkbook(buffer: ArrayBuffer) {
@@ -586,7 +604,12 @@ function parseImportedWorkbook(buffer: ArrayBuffer) {
     rows,
     columnMap,
     headerRow: headerIndex + 1,
+    headers,
   }
+}
+
+function hasHeader(headers: string[], pattern: RegExp) {
+  return headers.some((header) => pattern.test(header))
 }
 
 function findHeaderRow(rows: unknown[][]) {
