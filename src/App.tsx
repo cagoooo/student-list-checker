@@ -1,0 +1,702 @@
+import { useMemo, useState } from 'react'
+import type { ChangeEvent } from 'react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  FileSpreadsheet,
+  RefreshCw,
+  Upload,
+  Wand2,
+  XCircle,
+} from 'lucide-react'
+import * as XLSX from 'xlsx'
+import studentsData from './data/students.json'
+import './App.css'
+
+type Student = {
+  id: string
+  studentNo?: string
+  grade: number
+  classNo?: number
+  className: string
+  classCode: string
+  seatNo: string
+  name: string
+  gender?: string
+}
+
+type ImportedRow = {
+  id: string
+  rowNo: number
+  raw: Record<string, unknown>
+  classValue: string
+  seatNo: string
+  name: string
+}
+
+type ValidationStatus = 'pass' | 'warning' | 'error'
+
+type ValidationResult = ImportedRow & {
+  status: ValidationStatus
+  issue: string
+  suggestion?: Student
+  confidence: number
+}
+
+type ColumnMap = {
+  classKey?: string
+  seatKey?: string
+  nameKey?: string
+}
+
+const DEFAULT_STUDENTS = studentsData.students as Student[]
+const STUDENT_STORAGE_KEY = 'smes-student-database'
+
+const SAMPLE_ROWS = [
+  { 班級: '1年1班', 座號: '1', 姓名: '示範學生001', 項目: '閱讀獎' },
+  { 班級: '1年1班', 座號: '2', 姓名: '示範學身002', 項目: '閱讀獎' },
+  { 班級: '102', 座號: '5', 姓名: '示範學生031', 項目: '服務獎' },
+  { 班級: '6年6班', 座號: '26', 姓名: '不存在', 項目: '美術獎' },
+]
+
+const digitAliases: Record<string, string> = {
+  一: '1',
+  二: '2',
+  三: '3',
+  四: '4',
+  五: '5',
+  六: '6',
+  七: '7',
+  八: '8',
+  九: '9',
+}
+
+const classOrder: Record<string, string> = {
+  甲: '01',
+  乙: '02',
+  丙: '03',
+  丁: '04',
+  戊: '05',
+}
+
+function App() {
+  const [students, setStudents] = useState<Student[]>(() => loadStoredStudents() ?? DEFAULT_STUDENTS)
+  const [fileName, setFileName] = useState('範例名單.xlsx')
+  const [rows, setRows] = useState<ImportedRow[]>(() => buildImportedRows(SAMPLE_ROWS))
+  const [columnMap, setColumnMap] = useState<ColumnMap>(() => detectColumns(Object.keys(SAMPLE_ROWS[0])))
+  const [message, setMessage] = useState(
+    `已載入 ${DEFAULT_STUDENTS.length} 位學生資料，可直接測試校對與修正流程。`,
+  )
+
+  const headers = useMemo(() => collectHeaders(rows), [rows])
+  const results = useMemo(() => rows.map((row) => validateRow(row, students)), [rows, students])
+  const stats = useMemo(() => summarize(results), [results])
+
+  async function handleFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (/\.(pdf|doc|docx)$/i.test(file.name)) {
+      setMessage('此版本先支援 Excel / CSV。PDF 與 Word 會在下一階段加入文字抽取與版面辨識。')
+      event.target.value = ''
+      return
+    }
+
+    try {
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, { type: 'array' })
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
+
+      if (data.length === 0) {
+        setMessage('檔案裡沒有可辨識的資料列，請確認第一列包含欄位名稱。')
+        return
+      }
+
+      const detected = detectColumns(Object.keys(data[0]))
+      setRows(buildImportedRows(data, detected))
+      setColumnMap(detected)
+      setFileName(file.name)
+      setMessage(`已讀取 ${file.name}，共 ${data.length} 筆資料。`)
+    } catch {
+      setMessage('檔案讀取失敗，請確認格式為 .xlsx、.xls 或 .csv。')
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  async function handleDatabaseFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const buffer = await file.arrayBuffer()
+      const nextStudents = parseStudentDatabase(buffer)
+      setStudents(nextStudents)
+      localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(nextStudents))
+      setMessage(`已更新學生資料庫：${file.name}，共 ${nextStudents.length} 位學生。`)
+    } catch {
+      setMessage('學生資料庫更新失敗，請確認是學務系統匯出的學生資料概況 .xls。')
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  function resetDatabase() {
+    setStudents(DEFAULT_STUDENTS)
+    localStorage.removeItem(STUDENT_STORAGE_KEY)
+    setMessage(`已還原內建學生資料庫，共 ${DEFAULT_STUDENTS.length} 位學生。`)
+  }
+
+  function updateColumnMap(key: keyof ColumnMap, value: string) {
+    const next = { ...columnMap, [key]: value || undefined }
+    setColumnMap(next)
+    setRows((current) => current.map((row) => hydrateRow(row.raw, row.rowNo, next)))
+  }
+
+  function applySuggestion(result: ValidationResult) {
+    if (!result.suggestion) return
+    setRows((current) =>
+      current.map((row) => {
+        if (row.id !== result.id || !result.suggestion) return row
+        const raw = applyStudentToRaw(row.raw, result.suggestion, columnMap)
+        return hydrateRow(raw, row.rowNo, columnMap)
+      }),
+    )
+  }
+
+  function applyAllSuggestions() {
+    setRows((current) =>
+      current.map((row) => {
+        const result = validateRow(row, students)
+        if (!result.suggestion || result.status === 'pass') return row
+        const raw = applyStudentToRaw(row.raw, result.suggestion, columnMap)
+        return hydrateRow(raw, row.rowNo, columnMap)
+      }),
+    )
+  }
+
+  function downloadCorrected() {
+    const output = results.map((result) => {
+      const corrected = result.suggestion ?? {
+        className: result.classValue,
+        seatNo: result.seatNo,
+        name: result.name,
+      }
+
+      return {
+        ...result.raw,
+        校對狀態: statusLabel(result.status),
+        錯誤提示: result.issue,
+        建議班級: corrected.className,
+        建議座號: corrected.seatNo,
+        建議姓名: corrected.name,
+        信心分數: result.confidence,
+      }
+    })
+
+    const worksheet = XLSX.utils.json_to_sheet(output)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, '校對結果')
+    XLSX.writeFile(workbook, `${stripExtension(fileName)}-校對結果.xlsx`)
+  }
+
+  function downloadSample() {
+    const worksheet = XLSX.utils.json_to_sheet(SAMPLE_ROWS)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, '學生名單')
+    XLSX.writeFile(workbook, '學生名單校對範例.xlsx')
+  }
+
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">桃園市龍潭區石門國民小學</p>
+          <h1>學生名單校對平台</h1>
+        </div>
+        <div className="topbar-actions">
+          <button type="button" className="ghost-button" onClick={downloadSample}>
+            <FileSpreadsheet size={18} />
+            範例檔
+          </button>
+          <label className="primary-button">
+            <Upload size={18} />
+            上傳名單
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv,.pdf,.doc,.docx"
+              onChange={handleFile}
+            />
+          </label>
+        </div>
+      </header>
+
+      <section className="summary-band">
+        <div className="summary-copy">
+          <span className="file-pill">{fileName}</span>
+          <h2>自動比對班級、座號與姓名</h2>
+          <p>{message}</p>
+          <p className="source-note">
+            資料庫來源：{studentsData.sourceFile}，目前載入 {students.length} 位學生
+          </p>
+        </div>
+        <div className="metric-grid" aria-label="校對統計">
+          <Metric label="通過" value={stats.pass} tone="success" />
+          <Metric label="待確認" value={stats.warning} tone="warning" />
+          <Metric label="錯誤" value={stats.error} tone="danger" />
+          <Metric label="總筆數" value={results.length} tone="neutral" />
+        </div>
+      </section>
+
+      <section className="workspace">
+        <aside className="control-panel">
+          <div>
+            <h2>欄位對應</h2>
+            <p>系統會先自動判斷欄位，若老師檔案欄名不同，可在這裡手動指定。</p>
+          </div>
+          <ColumnSelect
+            label="班級欄位"
+            value={columnMap.classKey}
+            headers={headers}
+            onChange={(value) => updateColumnMap('classKey', value)}
+          />
+          <ColumnSelect
+            label="座號欄位"
+            value={columnMap.seatKey}
+            headers={headers}
+            onChange={(value) => updateColumnMap('seatKey', value)}
+          />
+          <ColumnSelect
+            label="姓名欄位"
+            value={columnMap.nameKey}
+            headers={headers}
+            onChange={(value) => updateColumnMap('nameKey', value)}
+          />
+          <div className="action-stack">
+            <label className="ghost-button wide">
+              <Upload size={18} />
+              更新學生資料庫
+              <input type="file" accept=".xls,.xlsx" onChange={handleDatabaseFile} />
+            </label>
+            <button type="button" className="ghost-button wide" onClick={resetDatabase}>
+              <RefreshCw size={18} />
+              還原內建資料庫
+            </button>
+            <button type="button" className="primary-button wide" onClick={applyAllSuggestions}>
+              <Wand2 size={18} />
+              套用全部建議
+            </button>
+            <button type="button" className="ghost-button wide" onClick={downloadCorrected}>
+              <Download size={18} />
+              下載校對結果
+            </button>
+          </div>
+        </aside>
+
+        <section className="table-panel">
+          <div className="table-toolbar">
+            <div>
+              <h2>校對結果</h2>
+              <p>系統不會直接覆蓋原始檔，需由行政人員確認後再下載修正版。</p>
+            </div>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                setRows(buildImportedRows(SAMPLE_ROWS, columnMap))
+                setFileName('範例名單.xlsx')
+              }}
+            >
+              <RefreshCw size={18} />
+              重置範例
+            </button>
+          </div>
+
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>狀態</th>
+                  <th>列號</th>
+                  <th>原始班級</th>
+                  <th>原始座號</th>
+                  <th>原始姓名</th>
+                  <th>提示</th>
+                  <th>建議修正</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((result) => (
+                  <tr key={result.id} className={`row-${result.status}`}>
+                    <td>
+                      <StatusBadge status={result.status} />
+                    </td>
+                    <td>{result.rowNo}</td>
+                    <td>{result.classValue || '未填'}</td>
+                    <td>{result.seatNo || '未填'}</td>
+                    <td>{result.name || '未填'}</td>
+                    <td>{result.issue}</td>
+                    <td>
+                      {result.suggestion ? (
+                        <span className="suggestion">
+                          {result.suggestion.className} {result.suggestion.seatNo}號{' '}
+                          {result.suggestion.name}
+                        </span>
+                      ) : (
+                        <span className="muted">無</span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="mini-button"
+                        disabled={!result.suggestion || result.status === 'pass'}
+                        onClick={() => applySuggestion(result)}
+                        title="套用這一列的建議"
+                      >
+                        <Wand2 size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <footer className="site-credit">
+        Made with <span aria-label="愛心" className="site-credit__heart">♥</span> by{' '}
+        <a
+          href="https://www.smes.tyc.edu.tw/modules/tadnews/page.php?ncsn=11&nsn=16#a5"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="site-credit__author"
+        >
+          阿凱老師
+        </a>
+      </footer>
+    </main>
+  )
+}
+
+function Metric({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: number
+  tone: 'success' | 'warning' | 'danger' | 'neutral'
+}) {
+  return (
+    <div className={`metric metric-${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  )
+}
+
+function ColumnSelect({
+  label,
+  value,
+  headers,
+  onChange,
+}: {
+  label: string
+  value?: string
+  headers: string[]
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <select value={value ?? ''} onChange={(event) => onChange(event.target.value)}>
+        <option value="">尚未指定</option>
+        {headers.map((header) => (
+          <option key={header} value={header}>
+            {header}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function StatusBadge({ status }: { status: ValidationStatus }) {
+  const icon =
+    status === 'pass' ? (
+      <CheckCircle2 size={16} />
+    ) : status === 'warning' ? (
+      <AlertTriangle size={16} />
+    ) : (
+      <XCircle size={16} />
+    )
+
+  return (
+    <span className={`status-badge status-${status}`}>
+      {icon}
+      {statusLabel(status)}
+    </span>
+  )
+}
+
+function loadStoredStudents() {
+  try {
+    const value = localStorage.getItem(STUDENT_STORAGE_KEY)
+    if (!value) return null
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? (parsed as Student[]) : null
+  } catch {
+    return null
+  }
+}
+
+function parseStudentDatabase(buffer: ArrayBuffer): Student[] {
+  const workbook = XLSX.read(buffer, { type: 'array' })
+  const sheet = workbook.Sheets[workbook.SheetNames[0]]
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    defval: '',
+    raw: false,
+  })
+  const dataRows = rows.slice(3).filter((row) => row.some((cell) => toText(cell) !== ''))
+  const students = dataRows
+    .map((row): Student | null => {
+      const name = toText(row[0])
+      const studentNo = toText(row[1])
+      const grade = Number(toText(row[2]))
+      const gender = toText(row[3])
+      const classNo = Number(toText(row[4]))
+      const seatNumber = Number(toText(row[5]))
+
+      if (!name || !Number.isFinite(grade) || !Number.isFinite(classNo) || !Number.isFinite(seatNumber)) {
+        return null
+      }
+
+      const seatNo = String(seatNumber).padStart(2, '0')
+      const classCode = `${grade}${String(classNo).padStart(2, '0')}`
+      return {
+        id: studentNo || `${classCode}-${seatNo}`,
+        studentNo,
+        grade,
+        classNo,
+        className: `${grade}年${classNo}班`,
+        classCode,
+        seatNo,
+        name,
+        gender,
+      } satisfies Student
+    })
+    .filter((student): student is Student => student !== null)
+
+  if (students.length === 0) {
+    throw new Error('No students parsed')
+  }
+
+  return students
+}
+
+function buildImportedRows(data: Record<string, unknown>[], map?: ColumnMap): ImportedRow[] {
+  const detected = map ?? detectColumns(Object.keys(data[0] ?? {}))
+  return data.map((raw, index) => hydrateRow(raw, index + 2, detected))
+}
+
+function hydrateRow(raw: Record<string, unknown>, rowNo: number, map: ColumnMap): ImportedRow {
+  return {
+    id: `${rowNo}-${JSON.stringify(raw)}`,
+    rowNo,
+    raw,
+    classValue: toText(raw[map.classKey ?? '']),
+    seatNo: normalizeSeat(toText(raw[map.seatKey ?? ''])),
+    name: normalizeName(toText(raw[map.nameKey ?? ''])),
+  }
+}
+
+function applyStudentToRaw(raw: Record<string, unknown>, student: Student, map: ColumnMap) {
+  return {
+    ...raw,
+    [map.classKey || '班級']: student.className,
+    [map.seatKey || '座號']: student.seatNo,
+    [map.nameKey || '姓名']: student.name,
+  }
+}
+
+function detectColumns(headers: string[]): ColumnMap {
+  const find = (patterns: RegExp[]) =>
+    headers.find((header) => patterns.some((pattern) => pattern.test(header.trim())))
+
+  return {
+    classKey: find([/班級|班別|班$/i, /class/i]),
+    seatKey: find([/座號|號碼|座位|號$/i, /seat|number/i]),
+    nameKey: find([/姓名|學生|名字|姓名$/i, /name/i]),
+  }
+}
+
+function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
+  if (!row.classValue || !row.seatNo || !row.name) {
+    return {
+      ...row,
+      status: 'error',
+      issue: '缺少班級、座號或姓名，無法比對。',
+      confidence: 0,
+    }
+  }
+
+  const classCode = normalizeClass(row.classValue)
+  const exact = students.find(
+    (student) =>
+      normalizeClass(student.className) === classCode &&
+      student.seatNo === row.seatNo &&
+      normalizeName(student.name) === row.name,
+  )
+
+  if (exact) {
+    return {
+      ...row,
+      status: 'pass',
+      issue: '資料完全符合。',
+      suggestion: exact,
+      confidence: 100,
+    }
+  }
+
+  const sameSeat = students.find(
+    (student) => normalizeClass(student.className) === classCode && student.seatNo === row.seatNo,
+  )
+  if (sameSeat) {
+    const distance = levenshtein(normalizeName(sameSeat.name), row.name)
+    return {
+      ...row,
+      status: distance <= 2 ? 'warning' : 'error',
+      issue: `班級與座號吻合，但姓名應為「${sameSeat.name}」。`,
+      suggestion: sameSeat,
+      confidence: Math.max(55, 95 - distance * 15),
+    }
+  }
+
+  const sameName = students.find((student) => normalizeName(student.name) === row.name)
+  if (sameName) {
+    return {
+      ...row,
+      status: 'warning',
+      issue: '找到同名學生，但班級或座號不同。',
+      suggestion: sameName,
+      confidence: 76,
+    }
+  }
+
+  const fuzzy = students
+    .map((student) => ({
+      student,
+      distance: levenshtein(normalizeName(student.name), row.name),
+    }))
+    .sort((a, b) => a.distance - b.distance)[0]
+
+  if (fuzzy && fuzzy.distance <= 2) {
+    return {
+      ...row,
+      status: 'warning',
+      issue: `找不到完全相符資料，疑似姓名為「${fuzzy.student.name}」。`,
+      suggestion: fuzzy.student,
+      confidence: 64,
+    }
+  }
+
+  return {
+    ...row,
+    status: 'error',
+    issue: '查無符合學生，請確認班級、座號與姓名。',
+    confidence: 0,
+  }
+}
+
+function collectHeaders(rows: ImportedRow[]) {
+  return Array.from(new Set(rows.flatMap((row) => Object.keys(row.raw))))
+}
+
+function summarize(results: ValidationResult[]) {
+  return results.reduce(
+    (sum, result) => {
+      sum[result.status] += 1
+      return sum
+    },
+    { pass: 0, warning: 0, error: 0 },
+  )
+}
+
+function normalizeClass(value: string) {
+  const compact = value.replace(/\s/g, '').replace(/班$/, '')
+  if (/^\d{3}$/.test(compact)) return compact
+
+  const numericMatch = compact.match(/^([一二三四五六七八九\d])年?([一二三四五六七八九\d]+)$/)
+  if (numericMatch) {
+    const grade = toDigit(numericMatch[1])
+    const classNo = toDigit(numericMatch[2])
+    return `${grade}${classNo.padStart(2, '0')}`
+  }
+
+  const orderMatch = compact.match(/^([一二三四五六七八九\d])年?([甲乙丙丁戊])$/)
+  if (orderMatch) {
+    const grade = toDigit(orderMatch[1])
+    return `${grade}${classOrder[orderMatch[2]]}`
+  }
+
+  return compact
+}
+
+function toDigit(value: string) {
+  return value
+    .split('')
+    .map((char) => digitAliases[char] ?? char)
+    .join('')
+}
+
+function normalizeSeat(value: string) {
+  const number = Number(value.replace(/[^\d]/g, ''))
+  return Number.isFinite(number) && number > 0 ? String(number).padStart(2, '0') : ''
+}
+
+function normalizeName(value: string) {
+  return value.replace(/\s/g, '').trim()
+}
+
+function toText(value: unknown) {
+  return value === null || value === undefined ? '' : String(value).trim()
+}
+
+function levenshtein(a: string, b: string) {
+  const matrix = Array.from({ length: a.length + 1 }, (_, row) =>
+    Array.from({ length: b.length + 1 }, (_, column) => (row === 0 ? column : column === 0 ? row : 0)),
+  )
+
+  for (let row = 1; row <= a.length; row += 1) {
+    for (let column = 1; column <= b.length; column += 1) {
+      const cost = a[row - 1] === b[column - 1] ? 0 : 1
+      matrix[row][column] = Math.min(
+        matrix[row - 1][column] + 1,
+        matrix[row][column - 1] + 1,
+        matrix[row - 1][column - 1] + cost,
+      )
+    }
+  }
+
+  return matrix[a.length][b.length]
+}
+
+function statusLabel(status: ValidationStatus) {
+  return {
+    pass: '通過',
+    warning: '待確認',
+    error: '錯誤',
+  }[status]
+}
+
+function stripExtension(name: string) {
+  return name.replace(/\.[^.]+$/, '')
+}
+
+export default App
