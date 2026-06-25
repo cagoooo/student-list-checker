@@ -27,7 +27,7 @@ export async function importRosterFile(file: File): Promise<ImportDetectionResul
   }
 
   if (fileKind === 'word') {
-    const tables = await parseWordTables()
+    const tables = await parseWordTables(file)
     return tables.length > 0 ? buildDetectionResultFromTables(file.name, fileKind, tables) : buildUnsupportedResult(file.name, fileKind)
   }
 
