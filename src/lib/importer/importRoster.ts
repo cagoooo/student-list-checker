@@ -1,7 +1,9 @@
 import { detectRosterFields } from './fieldDetection'
 import { parseExcelTables } from './excel'
+import { parsePdfTables } from './pdf'
 import { buildImportedRows, parseStudentsFromTable } from './studentSource'
 import type { CandidateTable, FieldDetection, ImportDetectionResult, SourceFileKind } from './types'
+import { parseWordTables } from './word'
 
 const EMPTY_DETECTION: FieldDetection = {
   columnMap: {},
@@ -13,13 +15,23 @@ const EMPTY_DETECTION: FieldDetection = {
 export async function importRosterFile(file: File): Promise<ImportDetectionResult> {
   const fileKind = detectFileKind(file.name)
 
-  if (fileKind !== 'excel' && fileKind !== 'csv') {
-    return buildUnsupportedResult(file.name, fileKind)
+  if (fileKind === 'excel' || fileKind === 'csv') {
+    const buffer = await file.arrayBuffer()
+    const tables = parseExcelTables(buffer, file.name)
+    return buildDetectionResultFromTables(file.name, fileKind, tables)
   }
 
-  const buffer = await file.arrayBuffer()
-  const tables = parseExcelTables(buffer, file.name)
-  return buildDetectionResultFromTables(file.name, fileKind, tables)
+  if (fileKind === 'pdf') {
+    const tables = await parsePdfTables()
+    return tables.length > 0 ? buildDetectionResultFromTables(file.name, fileKind, tables) : buildUnsupportedResult(file.name, fileKind)
+  }
+
+  if (fileKind === 'word') {
+    const tables = await parseWordTables()
+    return tables.length > 0 ? buildDetectionResultFromTables(file.name, fileKind, tables) : buildUnsupportedResult(file.name, fileKind)
+  }
+
+  return buildUnsupportedResult(file.name, fileKind)
 }
 
 export function buildDetectionResultFromTables(
