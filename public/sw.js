@@ -1,10 +1,10 @@
-// Service Worker — 學生名單校對平台
-// BUILD_VERSION 由 CI（deploy-pages.yml）在部署時以 sed 替換；本機開發保留 __BUILD_VERSION__ 原樣。
+// Service Worker for 學生名單校對平台.
+// finalize-build.mjs replaces this placeholder in dist/sw.js.
 const BUILD_VERSION = '__BUILD_VERSION__'
 const CACHE_NAME = `refine-${BUILD_VERSION}`
 
 self.addEventListener('install', () => {
-  // 不呼叫 skipWaiting — 採 prompt-to-refresh，不打斷正在使用的人。
+  // Keep the new worker waiting so the app can show a prompt-to-refresh banner.
 })
 
 self.addEventListener('activate', (event) => {
@@ -27,10 +27,16 @@ self.addEventListener('message', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
+
   const url = new URL(event.request.url)
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return
+  if (url.origin !== self.location.origin) return
 
-  // HTML 導覽：network-first，永遠拿最新 index.html（避免 hash 過的 chunk 對不上）。
+  if (url.pathname.endsWith('/version.json') || url.pathname.endsWith('version.json')) {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }).catch(() => caches.match(event.request)))
+    return
+  }
+
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
@@ -41,8 +47,24 @@ self.addEventListener('fetch', (event) => {
           }
           return response
         })
-        .catch(() => caches.match(event.request).then((cached) => cached || Response.error())),
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html'))),
     )
+    return
   }
-  // 其餘資源（Vite 已對 JS/CSS 加 hash 自動 cache-bust）走預設網路，不額外攔截。
+
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      const network = fetch(event.request)
+        .then((response) => {
+          if (response.ok && response.type === 'basic') {
+            const clone = response.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
+          }
+          return response
+        })
+        .catch(() => cached)
+
+      return cached || network
+    }),
+  )
 })

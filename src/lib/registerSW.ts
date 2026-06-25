@@ -1,9 +1,31 @@
-// Service Worker 註冊 + 更新偵測（雙線：SW lifecycle 事件 + activate postMessage）。
-// 採 prompt-to-refresh：偵測到新版時呼叫 onUpdate，由 UI 顯示「立刻更新」提示，
-// 使用者點了才 skipWaiting → controllerchange → reload。
-
 let waitingWorker: ServiceWorker | null = null
 let updating = false
+let updateNotified = false
+
+function appVersion() {
+  return document.querySelector<HTMLMetaElement>('meta[name="app-version"]')?.content || 'dev'
+}
+
+function notifyUpdate(onUpdate: () => void) {
+  if (updateNotified) return
+  updateNotified = true
+  onUpdate()
+}
+
+async function checkVersion(onUpdate: () => void) {
+  try {
+    const response = await fetch(`${import.meta.env.BASE_URL}version.json?t=${Date.now()}`, {
+      cache: 'no-store',
+    })
+    if (!response.ok) return
+    const data = (await response.json()) as { version?: string }
+    if (data.version && data.version !== appVersion()) {
+      notifyUpdate(onUpdate)
+    }
+  } catch {
+    // Version polling is only a fallback; SW lifecycle events remain the primary signal.
+  }
+}
 
 export function registerServiceWorker(onUpdate: () => void) {
   if (import.meta.env.DEV) return
@@ -11,42 +33,47 @@ export function registerServiceWorker(onUpdate: () => void) {
 
   const swUrl = `${import.meta.env.BASE_URL}sw.js`
 
-  // 只有在使用者主動按下更新後（updating=true）才 reload，避免首次安裝時誤觸。
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (updating) window.location.reload()
   })
 
-  // 線 B：新 SW 在背景 activate 後主動通知（補捉 updatefound 沒抓到的情況）。
   navigator.serviceWorker.addEventListener('message', (event) => {
     if (event.data?.type === 'SW_ACTIVATED' && navigator.serviceWorker.controller) {
-      onUpdate()
+      notifyUpdate(onUpdate)
     }
   })
 
-  // updateViaCache: 'none' → 繞過瀏覽器 HTTP 快取，確保每次都從網路抓 sw.js。
   navigator.serviceWorker
     .register(swUrl, { updateViaCache: 'none' })
     .then((registration) => {
       const watch = (worker: ServiceWorker | null) => {
         worker?.addEventListener('statechange', () => {
-          // state=installed 且已有舊 controller = 這是「更新」而非首次安裝。
           if (worker.state === 'installed' && navigator.serviceWorker.controller) {
             waitingWorker = worker
-            onUpdate()
+            notifyUpdate(onUpdate)
           }
         })
       }
 
-      // 重整後新版可能已在 waiting，初次就要偵測（否則提示永遠不出現）。
       if (registration.waiting && navigator.serviceWorker.controller) {
         waitingWorker = registration.waiting
-        onUpdate()
+        notifyUpdate(onUpdate)
       }
 
       if (registration.installing) watch(registration.installing)
       registration.addEventListener('updatefound', () => watch(registration.installing))
+
+      const runVersionCheck = () => checkVersion(onUpdate)
+      window.addEventListener('focus', runVersionCheck)
+      window.addEventListener('online', runVersionCheck)
+      window.addEventListener('pageshow', runVersionCheck)
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') runVersionCheck()
+      })
+      window.setTimeout(runVersionCheck, 8000)
+      window.setInterval(runVersionCheck, 180000)
     })
-    .catch((error) => console.warn('[SW] 註冊失敗（本機開發可忽略）:', error))
+    .catch((error) => console.warn('[SW] registration failed; app can still run without offline cache.', error))
 }
 
 export function applyServiceWorkerUpdate() {

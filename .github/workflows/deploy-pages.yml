@@ -31,7 +31,10 @@ jobs:
         run: npm install
 
       - name: Build
-        run: npm run build
+        run: |
+          BUILD_VERSION="$(git rev-parse --short HEAD)-$(date -u +%Y%m%d%H%M)"
+          echo "BUILD_VERSION=${BUILD_VERSION}" >> "$GITHUB_ENV"
+          BUILD_VERSION="${BUILD_VERSION}" npm run build
         env:
           GITHUB_PAGES: 'true'
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
@@ -41,15 +44,18 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
 
-      - name: Inject Service Worker build version
+      - name: Verify build version
         run: |
-          BUILD_VERSION="$(git rev-parse --short HEAD)-$(date -u +%Y%m%d%H%M)"
-          sed -i "s/__BUILD_VERSION__/${BUILD_VERSION}/g" dist/sw.js
-          echo "✓ sw.js BUILD_VERSION 已注入：${BUILD_VERSION}"
           if grep -q '__BUILD_VERSION__' dist/sw.js; then
-            echo "::error::dist/sw.js 仍有未替換的 __BUILD_VERSION__"
+            echo "::error::dist/sw.js still contains __BUILD_VERSION__"
             exit 1
           fi
+          if grep -q '__APP_VERSION__' dist/index.html; then
+            echo "::error::dist/index.html still contains __APP_VERSION__"
+            exit 1
+          fi
+          test -f dist/version.json
+          echo "Build version: ${BUILD_VERSION}"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
