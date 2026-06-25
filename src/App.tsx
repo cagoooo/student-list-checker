@@ -105,7 +105,11 @@ function App() {
     if (!file) return
 
     try {
-      const imported = await importRosterFile(file)
+      setMessage(`正在讀取與辨識 ${file.name}…`)
+      const imported = await importRosterFile(file, {
+        onOcrProgress: ({ page, total }) =>
+          setMessage(`掃描型 PDF，正在以文字辨識（OCR）讀取第 ${page} / ${total} 頁…`),
+      })
       const warningMessage = imported.fieldDetection.warnings.join('；')
 
       if (!imported.selectedTable || imported.importedRows.length === 0) {
@@ -136,7 +140,7 @@ function App() {
             ),
       )
     } catch {
-      setMessage('檔案讀取失敗，請確認格式為 .xlsx、.xls 或 .csv。')
+      setMessage('檔案讀取失敗，請確認格式為 .xlsx、.xls、.csv、.pdf 或 .docx。')
     } finally {
       event.target.value = ''
     }

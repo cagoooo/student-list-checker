@@ -1,9 +1,14 @@
 import { detectRosterFields } from './fieldDetection'
 import { parseExcelTables } from './excel'
+import { ocrPdfTables, type OcrProgress } from './ocr'
 import { parsePdfTables } from './pdf'
 import { buildImportedRows, parseStudentsFromTable } from './studentSource'
 import type { CandidateTable, FieldDetection, ImportDetectionResult, SourceFileKind } from './types'
 import { parseWordTables } from './word'
+
+export type ImportRosterOptions = {
+  onOcrProgress?: (info: OcrProgress) => void
+}
 
 const EMPTY_DETECTION: FieldDetection = {
   columnMap: {},
@@ -12,7 +17,10 @@ const EMPTY_DETECTION: FieldDetection = {
   warnings: [],
 }
 
-export async function importRosterFile(file: File): Promise<ImportDetectionResult> {
+export async function importRosterFile(
+  file: File,
+  options: ImportRosterOptions = {},
+): Promise<ImportDetectionResult> {
   const fileKind = detectFileKind(file.name)
 
   if (fileKind === 'excel' || fileKind === 'csv') {
@@ -23,7 +31,12 @@ export async function importRosterFile(file: File): Promise<ImportDetectionResul
 
   if (fileKind === 'pdf') {
     const tables = await parsePdfTables(file)
-    return tables.length > 0 ? buildDetectionResultFromTables(file.name, fileKind, tables) : buildUnsupportedResult(file.name, fileKind)
+    if (tables.length > 0) return buildDetectionResultFromTables(file.name, fileKind, tables)
+
+    const ocrTables = await runPdfOcr(file, options.onOcrProgress)
+    return ocrTables.length > 0
+      ? buildDetectionResultFromTables(file.name, fileKind, ocrTables)
+      : buildUnsupportedResult(file.name, fileKind)
   }
 
   if (fileKind === 'word') {
@@ -99,12 +112,12 @@ export function buildUnsupportedResult(fileName: string, fileKind: SourceFileKin
       : fileKind === 'word'
         ? 'Word'
         : '此檔案格式'
-  const nextStep =
+  const warning =
     fileKind === 'pdf'
-      ? 'PDF 文字表格抽取'
+      ? '無法從這份 PDF 取得名單（文字抽取與影像 OCR 都沒有找到班級、座號、姓名）。若為掃描檔請確認影像清晰，或先轉成 Excel / CSV。'
       : fileKind === 'word'
-        ? 'Word 表格抽取'
-        : '更多格式辨識'
+        ? '無法從這份 Word 取得名單，請確認檔內含班級、座號、姓名的表格或段落，或先轉成 Excel / CSV。'
+        : `${label} 名單辨識尚未啟用，請先轉成 Excel / CSV。`
 
   return {
     fileName,
@@ -113,11 +126,20 @@ export function buildUnsupportedResult(fileName: string, fileKind: SourceFileKin
     candidates: [],
     fieldDetection: {
       ...EMPTY_DETECTION,
-      warnings: [`${label} 名單辨識尚未啟用，請先轉成 Excel / CSV，或等待下一階段 ${nextStep}。`],
+      warnings: [warning],
     },
     importedRows: [],
     sourceStudents: [],
     isOfficialStudentSource: false,
+  }
+}
+
+async function runPdfOcr(file: File, onProgress?: (info: OcrProgress) => void): Promise<CandidateTable[]> {
+  try {
+    return await ocrPdfTables(file, onProgress)
+  } catch {
+    // OCR 需下載語言資料，離線或環境受限時會失敗，退回提示由使用者轉檔。
+    return []
   }
 }
 
