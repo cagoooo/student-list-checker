@@ -26,6 +26,7 @@ import { detectColumns, parseExcelTables } from './lib/importer/excel'
 import { summarizeImportDiagnostics } from './lib/importer/diagnostics'
 import { importRosterFile, selectCandidateTable as selectImportCandidateTable } from './lib/importer/importRoster'
 import { buildCorrectedWordBlob } from './lib/importer/exportWord'
+import { recallColumnMap, rememberColumnMap } from './lib/importer/columnMemory'
 import {
   applyStudentToRaw,
   buildImportedRows,
@@ -125,20 +126,26 @@ function App() {
         setDatabaseMode('local')
       }
 
-      setRows(imported.importedRows)
-      setColumnMap(imported.fieldDetection.columnMap)
+      const savedMap = recallColumnMap(imported.selectedTable.headers)
+      const effectiveMap = savedMap ?? imported.fieldDetection.columnMap
+      setRows(
+        savedMap
+          ? imported.importedRows.map((row) => hydrateRow(row.raw, row.rowNo, effectiveMap))
+          : imported.importedRows,
+      )
+      setColumnMap(effectiveMap)
       setImportDetection(imported)
       setFileName(file.name)
       setMessage(
         imported.isOfficialStudentSource
           ? `已偵測 ${file.name} 為學生資料原始檔，共 ${imported.sourceStudents.length} 位學生，已先載入為本機校對基準。`
-          : buildImportMessage(
+          : `${buildImportMessage(
               file.name,
               imported.importedRows.length,
               imported.fieldDetection.confidence,
               imported.fieldDetection.reasons,
               warningMessage,
-            ),
+            )}${savedMap ? '（已套用先前記住的欄位對應）' : ''}`,
       )
     } catch {
       setMessage('檔案讀取失敗，請確認格式為 .xlsx、.xls、.csv、.pdf 或 .docx。')
@@ -197,6 +204,7 @@ function App() {
     const next = { ...columnMap, [key]: value || undefined }
     setColumnMap(next)
     setRows((current) => current.map((row) => hydrateRow(row.raw, row.rowNo, next)))
+    if (importDetection?.selectedTable) rememberColumnMap(importDetection.selectedTable.headers, next)
   }
 
   function selectCandidateTable(candidateId: string) {
