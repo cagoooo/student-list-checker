@@ -9,7 +9,9 @@
     "assets:brand": "node scripts/generate-brand-assets.mjs",
     "import:students": "node scripts/import-students.mjs",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "firebase": "^12.15.0",
@@ -27,6 +29,7 @@
     "oxlint": "^1.69.0",
     "png-to-ico": "^3.0.1",
     "typescript": "~6.0.2",
-    "vite": "^8.1.0"
+    "vite": "^8.1.0",
+    "vitest": "^4.1.9"
   }
 }
