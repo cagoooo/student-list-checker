@@ -2,6 +2,10 @@
 
 桃園市龍潭區石門國民小學使用的學生名單校對工具。第一版支援老師上傳 Excel / CSV 名單，系統會依班級、座號、姓名與學生資料庫交叉比對，並提供錯誤提示、修正建議與校對結果下載。
 
+**線上 Demo**：[https://cagoooo.github.io/student-list-checker/](https://cagoooo.github.io/student-list-checker/)
+
+> 公開 Demo 內建資料已匿名化。正式學生資料請由使用者在瀏覽器內上傳更新；目前資料只會存在該瀏覽器本機暫存，不會送到 GitHub。
+
 ## 目前功能
 
 - 讀取 `.xlsx`、`.xls`、`.csv` 名單
