@@ -22,7 +22,7 @@ export async function importRosterFile(file: File): Promise<ImportDetectionResul
   }
 
   if (fileKind === 'pdf') {
-    const tables = await parsePdfTables()
+    const tables = await parsePdfTables(file)
     return tables.length > 0 ? buildDetectionResultFromTables(file.name, fileKind, tables) : buildUnsupportedResult(file.name, fileKind)
   }
 
