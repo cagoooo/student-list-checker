@@ -16,9 +16,11 @@ export function detectColumns(headers: string[]): ColumnMap {
   }
 }
 
+// 找出最像「標題列」的列；若前 30 列都沒有任何可辨識欄名（score 全為 0），回傳 -1
+// 代表這份檔案沒有可辨識的標題列。
 export function findHeaderRow(rows: unknown[][]) {
   let bestIndex = 0
-  let bestScore = -1
+  let bestScore = 0
 
   rows.slice(0, 30).forEach((row, index) => {
     const headers = normalizeHeaders(row)
@@ -35,7 +37,36 @@ export function findHeaderRow(rows: unknown[][]) {
     }
   })
 
-  return bestIndex
+  return bestScore > 0 ? bestIndex : -1
+}
+
+// 一列若同時出現「中文姓名樣態」與「合理座號樣態」，就把它當成資料列而非標題列。
+function looksLikeDataRow(row: unknown[]) {
+  const values = row.map((cell) => toText(cell)).filter(Boolean)
+  const hasName = values.some((value) => /^[一-鿿]{2,5}$/.test(value.replace(/\s/g, '')))
+  const hasSeat = values.some((value) => /^\d{1,2}$/.test(value) && Number(value) >= 1 && Number(value) <= 40)
+  return hasName && hasSeat
+}
+
+export type ResolvedHeader = {
+  headerIndex: number
+  headers: string[]
+  headerless: boolean
+}
+
+// 統一決定標題列：找得到→用該列當標題；找不到但首列像資料→視為無標題列、合成欄名（欄位1…N）
+// 並把整份都當資料；找不到且首列不像資料→仍把首列當標題（只是欄名我們不認得）。
+export function resolveHeader(rows: unknown[][]): ResolvedHeader {
+  const headerIndex = findHeaderRow(rows)
+
+  if (headerIndex < 0 && rows.length > 0 && looksLikeDataRow(rows[0])) {
+    const width = rows.reduce((max, row) => Math.max(max, row.length), 0)
+    const headers = normalizeHeaders(new Array(width).fill(''))
+    return { headerIndex: -1, headers, headerless: true }
+  }
+
+  const index = headerIndex < 0 ? 0 : headerIndex
+  return { headerIndex: index, headers: normalizeHeaders(rows[index] ?? []), headerless: false }
 }
 
 export function toRecord(row: unknown[], headers: string[], rowNo: number): Record<string, unknown> {
@@ -55,11 +86,12 @@ export function parseExcelTables(buffer: ArrayBuffer, sourceName: string): Candi
       defval: '',
       raw: false,
     })
-    const headerIndex = findHeaderRow(sheetRows)
-    const headers = normalizeHeaders(sheetRows[headerIndex] ?? [])
+    const { headers, headerless, headerIndex } = resolveHeader(sheetRows)
+    const dataStart = headerless ? 0 : headerIndex + 1
+    const headerRow = headerless ? 0 : headerIndex + 1
     const rows = sheetRows
-      .slice(headerIndex + 1)
-      .map((row, index) => toRecord(row, headers, headerIndex + index + 2))
+      .slice(dataStart)
+      .map((row, index) => toRecord(row, headers, dataStart + index + 1))
       .filter((row) =>
         Object.entries(row)
           .filter(([key]) => !key.startsWith('__'))
@@ -67,10 +99,10 @@ export function parseExcelTables(buffer: ArrayBuffer, sourceName: string): Candi
       )
 
     return {
-      id: `${sheetName}-${headerIndex + 1}`,
+      id: `${sheetName}-${headerRow}`,
       sourceName,
       sheetName,
-      headerRow: headerIndex + 1,
+      headerRow,
       headers,
       rows,
       rowCount: rows.length,

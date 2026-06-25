@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectColumns, findHeaderRow, normalizeHeaders } from '../excel'
+import { detectColumns, findHeaderRow, normalizeHeaders, resolveHeader } from '../excel'
 
 describe('excel roster detection', () => {
   const rows = [
@@ -25,5 +25,33 @@ describe('excel roster detection', () => {
       classKey: '班級',
       seatKey: '座號',
     })
+  })
+
+  it('resolves the header row when labels exist', () => {
+    expect(resolveHeader(rows)).toMatchObject({ headerIndex: 2, headerless: false })
+  })
+})
+
+describe('headerless roster detection', () => {
+  it('treats a file with no labels as data and synthesizes column names', () => {
+    const rows = [
+      ['101', '1', '邱紘睿'],
+      ['101', '2', '黃宥寧'],
+    ]
+
+    const resolved = resolveHeader(rows)
+
+    expect(resolved.headerless).toBe(true)
+    expect(resolved.headers).toEqual(['欄位1', '欄位2', '欄位3'])
+    expect(findHeaderRow(rows)).toBe(-1)
+  })
+
+  it('keeps the first row as header when it does not look like data', () => {
+    const rows = [
+      ['項目', '備註'],
+      ['朗讀', '高年級'],
+    ]
+
+    expect(resolveHeader(rows)).toMatchObject({ headerIndex: 0, headerless: false })
   })
 })

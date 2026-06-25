@@ -396,7 +396,7 @@ function App() {
               <strong>自動辨識信心 {importDetection.fieldDetection.confidence}%</strong>
               <span>
                 {importDetection.selectedTable?.sheetName
-                  ? `${importDetection.selectedTable.sheetName}，第 ${importDetection.selectedTable.headerRow} 列作為欄位列`
+                  ? `${importDetection.selectedTable.sheetName}，${headerRowLabel(importDetection.selectedTable.headerRow)}`
                   : '尚未找到可判讀表格'}
               </span>
               {importDetection.fieldDetection.warnings.map((warning) => (
@@ -690,9 +690,14 @@ function confidenceTone(confidence: number) {
   return 'low'
 }
 
+function headerRowLabel(headerRow: number) {
+  return headerRow > 0 ? `第 ${headerRow} 列作為欄位列` : '無標題列，整份視為資料'
+}
+
 function candidateLabel(candidate: CandidateTable) {
   const sheetName = candidate.sheetName || candidate.sourceName
-  return `${sheetName}，第 ${candidate.headerRow} 列，${candidate.rowCount} 筆`
+  const headerPart = candidate.headerRow > 0 ? `第 ${candidate.headerRow} 列` : '無標題列'
+  return `${sheetName}，${headerPart}，${candidate.rowCount} 筆`
 }
 
 function validateRow(row: ImportedRow, students: Student[]): ValidationResult {

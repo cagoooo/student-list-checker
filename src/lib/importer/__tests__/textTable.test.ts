@@ -28,4 +28,19 @@ describe('tablesFromTextRows', () => {
     expect(tables[0].rows[0][SOURCE_LOCATION_KEY]).toBe('第 1 頁')
     expect(tables[0].rows[1][SOURCE_LOCATION_KEY]).toBe('第 3 頁')
   })
+
+  it('keeps every row when the source has no header line', () => {
+    const tables = tablesFromTextRows(
+      [
+        { text: '101 1 邱紘睿' },
+        { text: '101 2 黃宥寧' },
+      ],
+      '無標題.pdf',
+      { idPrefix: 'pdf', sheetName: 'PDF 文字表格' },
+    )
+
+    expect(tables[0].headerRow).toBe(0)
+    expect(tables[0].headers).toEqual(['欄位1', '欄位2', '欄位3'])
+    expect(tables[0].rowCount).toBe(2)
+  })
 })

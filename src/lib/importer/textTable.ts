@@ -1,5 +1,5 @@
 import type { CandidateTable } from './types'
-import { findHeaderRow, normalizeHeaders, toRecord } from './excel'
+import { resolveHeader, toRecord } from './excel'
 import { SOURCE_LOCATION_KEY, toText } from './normalize'
 
 export type TextRow = { text: string; page?: number }
@@ -34,12 +34,13 @@ export function tablesFromTextRows(
   if (parsed.length === 0) return []
 
   const cellRows = parsed.map((row) => row.cells)
-  const headerIndex = findHeaderRow(cellRows)
-  const headers = normalizeHeaders(cellRows[headerIndex] ?? [])
+  const { headers, headerless, headerIndex } = resolveHeader(cellRows)
+  const dataStart = headerless ? 0 : headerIndex + 1
+  const headerRow = headerless ? 0 : headerIndex + 1
   const dataRows = parsed
-    .slice(headerIndex + 1)
+    .slice(dataStart)
     .map((row, index) => {
-      const record = toRecord(row.cells, headers, headerIndex + index + 2)
+      const record = toRecord(row.cells, headers, dataStart + index + 1)
       if (row.page) record[SOURCE_LOCATION_KEY] = `第 ${row.page} 頁`
       return record
     })
@@ -54,7 +55,7 @@ export function tablesFromTextRows(
       id: `${idPrefix}-text-table-1`,
       sourceName,
       sheetName,
-      headerRow: headerIndex + 1,
+      headerRow,
       headers,
       rows: dataRows,
       rowCount: dataRows.length,

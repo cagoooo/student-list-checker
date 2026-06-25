@@ -64,7 +64,8 @@ export function detectRosterFields(table: CandidateTable): FieldDetection {
     nameKey: headerMap.nameKey ?? bestName?.header,
   }
 
-  const reasons: string[] = [`欄位列：第 ${table.headerRow} 列`, `資料筆數：${table.rowCount} 筆`]
+  const headerReason = table.headerRow > 0 ? `欄位列：第 ${table.headerRow} 列` : '欄位列：無標題列，由內容推測欄位'
+  const reasons: string[] = [headerReason, `資料筆數：${table.rowCount} 筆`]
   const warnings: string[] = []
   let confidence = 0
 

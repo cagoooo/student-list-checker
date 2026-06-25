@@ -1,5 +1,5 @@
 import type { CandidateTable } from './types'
-import { findHeaderRow, normalizeHeaders, toRecord } from './excel'
+import { resolveHeader, toRecord } from './excel'
 import { toText } from './normalize'
 import { tablesFromTextLines } from './textTable'
 
@@ -73,11 +73,12 @@ function tablesFromTableHtml(html: string, sourceName: string): CandidateTable[]
       const grid = parseTableGrid(match[0]).filter((row) => row.some((cell) => cell !== ''))
       if (grid.length === 0) return null
 
-      const headerIndex = findHeaderRow(grid)
-      const headers = normalizeHeaders(grid[headerIndex] ?? [])
+      const { headers, headerless, headerIndex } = resolveHeader(grid)
+      const dataStart = headerless ? 0 : headerIndex + 1
+      const headerRow = headerless ? 0 : headerIndex + 1
       const dataRows = grid
-        .slice(headerIndex + 1)
-        .map((row, rowIndex) => toRecord(row, headers, headerIndex + rowIndex + 2))
+        .slice(dataStart)
+        .map((row, rowIndex) => toRecord(row, headers, dataStart + rowIndex + 1))
         .filter((row) =>
           Object.entries(row)
             .filter(([key]) => !key.startsWith('__'))
@@ -88,7 +89,7 @@ function tablesFromTableHtml(html: string, sourceName: string): CandidateTable[]
         id: `word-table-${index + 1}`,
         sourceName,
         sheetName: `Word 表格 ${index + 1}`,
-        headerRow: headerIndex + 1,
+        headerRow,
         headers,
         rows: dataRows,
         rowCount: dataRows.length,
