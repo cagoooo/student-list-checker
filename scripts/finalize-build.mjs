@@ -5,10 +5,15 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const distDir = join(root, 'dist')
 const siteUrl = 'https://cagoooo.github.io/student-list-checker/'
+const safeDirectory = root.replaceAll('\\', '/')
 
 function git(args) {
   try {
-    return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
+    return execFileSync('git', ['-c', `safe.directory=${safeDirectory}`, ...args], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
   } catch {
     return ''
   }
