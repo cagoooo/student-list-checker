@@ -14,6 +14,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "docx": "^9.7.1",
     "firebase": "^12.15.0",
     "lucide-react": "^1.21.0",
     "mammoth": "^1.12.0",

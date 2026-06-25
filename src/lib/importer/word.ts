@@ -3,10 +3,60 @@ import { findHeaderRow, normalizeHeaders, toRecord } from './excel'
 import { toText } from './normalize'
 import { tablesFromTextLines } from './textTable'
 
+export async function parseWordRoster(file: File): Promise<CandidateTable[]> {
+  if (/\.docx$/i.test(file.name)) return parseWordTables(file)
+  return parseLegacyDocTables(file)
+}
+
 export async function parseWordTables(file: File): Promise<CandidateTable[]> {
   const mammoth = await import('mammoth')
   const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() })
   return tablesFromHtml(result.value, file.name)
+}
+
+// 舊版 .doc（Word 97-2003 OLE 二進位）無法用 mammoth 解析，這裡盡力從位元組中
+// 還原可讀文字（多為 UTF-16LE），再交給文字表格抽取器。屬 best-effort，失敗時
+// 會退回「請先轉成 Excel / CSV」的提示。
+export async function parseLegacyDocTables(file: File): Promise<CandidateTable[]> {
+  const text = decodeDocBytes(await file.arrayBuffer())
+  const lines = extractDocTextLines(text)
+  return tablesFromTextLines(lines, file.name, { idPrefix: 'doc', sheetName: 'Word（.doc）名單' })
+}
+
+export function decodeDocBytes(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  const utf16 = new TextDecoder('utf-16le', { fatal: false }).decode(bytes)
+  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+  return countCjk(utf16) >= countCjk(utf8) ? utf16 : utf8
+}
+
+const REPLACEMENT_CODE = 0xfffd
+
+// .doc 段落結尾為 CR、表格儲存格標記為控制字元。逐字元判斷字碼：換行字元轉為斷行、
+// 其他控制字元轉成 tab 欄位分隔，再過濾出含中文或數字的可讀列（避免在原始碼放控制字元）。
+export function extractDocTextLines(text: string): string[] {
+  let normalized = ''
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0
+    if (char === '\r' || char === '\n') {
+      normalized += '\n'
+    } else if (code === REPLACEMENT_CODE) {
+      normalized += ' '
+    } else if (code < 0x20 && char !== '\t') {
+      normalized += '\t'
+    } else {
+      normalized += char
+    }
+  }
+
+  return normalized
+    .split('\n')
+    .map((line) => line.replace(/\t+/g, '\t').replace(/[　 ]+/g, ' ').trim())
+    .filter((line) => /[一-鿿\d]/.test(line))
+}
+
+function countCjk(text: string) {
+  return (text.match(/[一-鿿]/g) ?? []).length
 }
 
 export function tablesFromHtml(html: string, sourceName: string): CandidateTable[] {

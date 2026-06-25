@@ -4,7 +4,7 @@ import { ocrPdfTables, type OcrProgress } from './ocr'
 import { parsePdfTables } from './pdf'
 import { buildImportedRows, parseStudentsFromTable } from './studentSource'
 import type { CandidateTable, FieldDetection, ImportDetectionResult, SourceFileKind } from './types'
-import { parseWordTables } from './word'
+import { parseWordRoster } from './word'
 
 export type ImportRosterOptions = {
   onOcrProgress?: (info: OcrProgress) => void
@@ -40,7 +40,7 @@ export async function importRosterFile(
   }
 
   if (fileKind === 'word') {
-    const tables = await parseWordTables(file)
+    const tables = await parseWordRoster(file)
     return tables.length > 0 ? buildDetectionResultFromTables(file.name, fileKind, tables) : buildUnsupportedResult(file.name, fileKind)
   }
 

@@ -25,6 +25,7 @@ import {
 import { detectColumns, parseExcelTables } from './lib/importer/excel'
 import { summarizeImportDiagnostics } from './lib/importer/diagnostics'
 import { importRosterFile, selectCandidateTable as selectImportCandidateTable } from './lib/importer/importRoster'
+import { buildCorrectedWordBlob } from './lib/importer/exportWord'
 import {
   applyStudentToRaw,
   buildImportedRows,
@@ -278,6 +279,36 @@ function App() {
     XLSX.writeFile(workbook, `${stripExtension(fileName)}-校對結果.xlsx`)
   }
 
+  async function downloadCorrectedWord() {
+    const entries = results.map((result) => {
+      const corrected = result.suggestion ?? {
+        className: result.classValue,
+        seatNo: result.seatNo,
+        name: result.name,
+      }
+      return {
+        status: statusLabel(result.status),
+        sourceLabel: result.sourceLabel,
+        className: corrected.className,
+        seatNo: corrected.seatNo,
+        name: corrected.name,
+        issue: result.issue,
+      }
+    })
+
+    try {
+      const blob = await buildCorrectedWordBlob(`${stripExtension(fileName)} 校對結果`, entries)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${stripExtension(fileName)}-校對結果.docx`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      setMessage('產生修正版 Word 失敗，請改用下載校對結果（Excel）。')
+    }
+  }
+
   function downloadSample() {
     const worksheet = XLSX.utils.json_to_sheet(SAMPLE_ROWS)
     const workbook = XLSX.utils.book_new()
@@ -428,6 +459,10 @@ function App() {
             <button type="button" className="ghost-button wide" onClick={downloadCorrected}>
               <Download size={18} />
               下載校對結果
+            </button>
+            <button type="button" className="ghost-button wide" onClick={downloadCorrectedWord}>
+              <Download size={18} />
+              下載修正版 Word
             </button>
           </div>
         </aside>
