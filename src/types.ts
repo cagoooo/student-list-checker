@@ -1,0 +1,38 @@
+export type Student = {
+  id: string
+  studentNo?: string
+  grade: number
+  classNo?: number
+  className: string
+  classCode: string
+  seatNo: string
+  name: string
+  gender?: string
+  updatedAt?: string
+}
+
+export type ImportedRow = {
+  id: string
+  rowNo: number
+  raw: Record<string, unknown>
+  classValue: string
+  seatNo: string
+  name: string
+}
+
+export type ValidationStatus = 'pass' | 'warning' | 'error'
+
+export type ValidationResult = ImportedRow & {
+  status: ValidationStatus
+  issue: string
+  suggestion?: Student
+  confidence: number
+}
+
+export type ColumnMap = {
+  classKey?: string
+  seatKey?: string
+  nameKey?: string
+}
+
+export type DatabaseMode = 'demo' | 'local' | 'firebase'

@@ -375,9 +375,11 @@ Word 檔常有表格、條列、複製貼上的名單格式。
 
 目標：讓行政老師能穩定處理 Excel 名單。
 
+- 建立 Firebase project 並設定 GitHub Secrets
+- 部署 Firestore Rules
+- 建立第一位 `admins/{uid}` 管理員
+- 將學生資料同步到 Firestore
 - 後端化 Excel 解析
-- 正式學生資料庫
-- 登入權限
 - 上傳與校對紀錄
 - 錯誤篩選與只看待確認列
 

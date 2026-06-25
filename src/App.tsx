@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import {
   AlertTriangle,
@@ -12,43 +12,16 @@ import {
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import studentsData from './data/students.json'
+import {
+  isFirebaseEnabled,
+  loadFirebaseStudents,
+  saveFirebaseStudents,
+  signInWithGoogle,
+  signOutFirebase,
+  subscribeCurrentUser,
+} from './lib/firebase'
+import type { ColumnMap, DatabaseMode, ImportedRow, Student, ValidationResult, ValidationStatus } from './types'
 import './App.css'
-
-type Student = {
-  id: string
-  studentNo?: string
-  grade: number
-  classNo?: number
-  className: string
-  classCode: string
-  seatNo: string
-  name: string
-  gender?: string
-}
-
-type ImportedRow = {
-  id: string
-  rowNo: number
-  raw: Record<string, unknown>
-  classValue: string
-  seatNo: string
-  name: string
-}
-
-type ValidationStatus = 'pass' | 'warning' | 'error'
-
-type ValidationResult = ImportedRow & {
-  status: ValidationStatus
-  issue: string
-  suggestion?: Student
-  confidence: number
-}
-
-type ColumnMap = {
-  classKey?: string
-  seatKey?: string
-  nameKey?: string
-}
 
 const DEFAULT_STUDENTS = studentsData.students as Student[]
 const STUDENT_STORAGE_KEY = 'smes-student-database'
@@ -81,7 +54,10 @@ const classOrder: Record<string, string> = {
 }
 
 function App() {
+  const firebaseReady = isFirebaseEnabled()
   const [students, setStudents] = useState<Student[]>(() => loadStoredStudents() ?? DEFAULT_STUDENTS)
+  const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => (loadStoredStudents() ? 'local' : 'demo'))
+  const [userEmail, setUserEmail] = useState('')
   const [fileName, setFileName] = useState('範例名單.xlsx')
   const [rows, setRows] = useState<ImportedRow[]>(() => buildImportedRows(SAMPLE_ROWS))
   const [columnMap, setColumnMap] = useState<ColumnMap>(() => detectColumns(Object.keys(SAMPLE_ROWS[0])))
@@ -92,6 +68,28 @@ function App() {
   const headers = useMemo(() => collectHeaders(rows), [rows])
   const results = useMemo(() => rows.map((row) => validateRow(row, students)), [rows, students])
   const stats = useMemo(() => summarize(results), [results])
+
+  useEffect(() => {
+    if (!firebaseReady) return undefined
+
+    return subscribeCurrentUser(async (user) => {
+      setUserEmail(user?.email ?? '')
+      if (!user) return
+
+      try {
+        const firebaseStudents = await loadFirebaseStudents()
+        if (firebaseStudents.length > 0) {
+          setStudents(firebaseStudents)
+          setDatabaseMode('firebase')
+          setMessage(`已從 Firebase 載入 ${firebaseStudents.length} 位學生資料。`)
+        } else {
+          setMessage('已登入 Firebase，但雲端學生資料庫尚未建立，可先上傳學務系統匯出檔。')
+        }
+      } catch {
+        setMessage('Firebase 學生資料讀取失敗，請確認 Firestore 規則與登入權限。')
+      }
+    })
+  }, [firebaseReady])
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -134,8 +132,16 @@ function App() {
       const buffer = await file.arrayBuffer()
       const nextStudents = parseStudentDatabase(buffer)
       setStudents(nextStudents)
-      localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(nextStudents))
-      setMessage(`已更新學生資料庫：${file.name}，共 ${nextStudents.length} 位學生。`)
+      if (firebaseReady && userEmail) {
+        await saveFirebaseStudents(nextStudents, file.name)
+        localStorage.removeItem(STUDENT_STORAGE_KEY)
+        setDatabaseMode('firebase')
+        setMessage(`已更新 Firebase 學生資料庫：${file.name}，共 ${nextStudents.length} 位學生。`)
+      } else {
+        localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(nextStudents))
+        setDatabaseMode('local')
+        setMessage(`已更新本機學生資料庫：${file.name}，共 ${nextStudents.length} 位學生。`)
+      }
     } catch {
       setMessage('學生資料庫更新失敗，請確認是學務系統匯出的學生資料概況 .xls。')
     } finally {
@@ -146,7 +152,22 @@ function App() {
   function resetDatabase() {
     setStudents(DEFAULT_STUDENTS)
     localStorage.removeItem(STUDENT_STORAGE_KEY)
+    setDatabaseMode('demo')
     setMessage(`已還原內建學生資料庫，共 ${DEFAULT_STUDENTS.length} 位學生。`)
+  }
+
+  async function handleSignIn() {
+    try {
+      await signInWithGoogle()
+    } catch {
+      setMessage('Firebase 登入失敗，請確認 Firebase Auth 設定與授權網域。')
+    }
+  }
+
+  async function handleSignOut() {
+    await signOutFirebase()
+    setUserEmail('')
+    setMessage('已登出 Firebase，系統會繼續使用目前瀏覽器中的資料。')
   }
 
   function updateColumnMap(key: keyof ColumnMap, value: string) {
@@ -215,8 +236,25 @@ function App() {
         <div>
           <p className="eyebrow">桃園市龍潭區石門國民小學</p>
           <h1>學生名單校對平台</h1>
+          <p className={`database-chip database-${databaseMode}`}>
+            {databaseModeLabel(databaseMode)}
+            {userEmail ? `：${userEmail}` : ''}
+          </p>
         </div>
         <div className="topbar-actions">
+          {firebaseReady ? (
+            userEmail ? (
+              <button type="button" className="ghost-button" onClick={handleSignOut}>
+                登出 Firebase
+              </button>
+            ) : (
+              <button type="button" className="ghost-button" onClick={handleSignIn}>
+                登入 Firebase
+              </button>
+            )
+          ) : (
+            <span className="firebase-note">Firebase 尚未設定</span>
+          )}
           <button type="button" className="ghost-button" onClick={downloadSample}>
             <FileSpreadsheet size={18} />
             範例檔
@@ -239,7 +277,7 @@ function App() {
           <h2>自動比對班級、座號與姓名</h2>
           <p>{message}</p>
           <p className="source-note">
-            資料庫來源：{studentsData.sourceFile}，目前載入 {students.length} 位學生
+            資料庫來源：{databaseModeLabel(databaseMode)}，目前載入 {students.length} 位學生
           </p>
         </div>
         <div className="metric-grid" aria-label="校對統計">
@@ -693,6 +731,14 @@ function statusLabel(status: ValidationStatus) {
     warning: '待確認',
     error: '錯誤',
   }[status]
+}
+
+function databaseModeLabel(mode: DatabaseMode) {
+  return {
+    demo: '公開匿名示範資料',
+    local: '瀏覽器本機資料',
+    firebase: 'Firebase 雲端資料庫',
+  }[mode]
 }
 
 function stripExtension(name: string) {

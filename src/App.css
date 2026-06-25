@@ -21,6 +21,35 @@
   font-weight: 700;
 }
 
+.database-chip,
+.firebase-note {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 28px;
+  margin-top: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.database-demo,
+.firebase-note {
+  color: #526071;
+  background: #eef2f6;
+}
+
+.database-local {
+  color: #8a5a08;
+  background: #fff0c4;
+}
+
+.database-firebase {
+  color: #1d704d;
+  background: #e9f7ef;
+}
+
 h1,
 h2,
 p {

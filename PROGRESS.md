@@ -16,6 +16,10 @@
 | 欄位辨識 | 已完成 | 自動偵測班級、座號、姓名欄位 | 可手動調整欄位對應 |
 | 學生資料庫種子 | 已完成 | 已從本機學務系統匯出檔匯入 795 位學生，公開版已匿名化 | 輸出至 `src/data/students.json` |
 | 學生資料庫更新 | 已完成 | 前端可上傳新的學生資料概況 `.xls` 更新本機資料庫 | 目前暫存於瀏覽器 `localStorage` |
+| Firebase SDK | 已完成 | 已加入 Firebase 初始化、Google 登入、Firestore 讀寫服務 | 未設定 env 時會退回匿名示範模式 |
+| Firestore 資料模型 | 已完成 | 已定義 `students`、`studentDatabaseMeta`、`admins` | 詳見 `FIREBASE_SETUP.md` |
+| Firestore 安全規則 | 已完成 | 預設拒絕；僅 `admins/{uid}` 可讀寫學生資料 | 需部署到 Firebase project |
+| GitHub Secrets 串接 | 已完成 | GitHub Actions 已可接收 `VITE_FIREBASE_*` secrets | 尚待填入正式 Firebase Web App config |
 | 資料庫匯入腳本 | 已完成 | 新增 `scripts/import-students.mjs` | 可用 `npm run import:students -- "<檔案路徑>"` 重建種子資料 |
 | 校對邏輯 | 已完成 | 比對班級、座號、姓名，產生通過、待確認、錯誤狀態 | 支援班級格式正規化與座號補零 |
 | 修正建議 | 已完成 | 可依班級 + 座號找到正確姓名，也可依姓名提示疑似學生 | 第一版採規則式比對 |
@@ -30,7 +34,7 @@
 |---|---|---|
 | PDF / Word 解析 | 尚未實作 | 目前只提示下一階段支援，尚未抽取文字與表格 |
 | 正式登入權限 | 尚未實作 | 目前是單機前端工具，尚無教師 / 行政角色登入 |
-| 正式後端資料庫 | 尚未實作 | 目前資料庫存在 `students.json` 與瀏覽器本機暫存 |
+| 正式後端資料庫 | 部分完成 | 已加入 Firebase / Firestore 架構，尚待建立 Firebase project 與 secrets |
 | 操作紀錄 | 尚未實作 | 尚未保存誰上傳、誰修正、何時下載 |
 | Excel 解析安全性 | 需改善 | 目前使用 `xlsx`，`npm audit` 顯示套件有 high severity 且暫無官方修補版 |
 | 大量名單效能 | 未壓測 | 第一版足以處理一般班級 / 活動名單，尚未針對全校大量檔案做效能測試 |
