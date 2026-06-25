@@ -56,18 +56,27 @@ export function buildDetectionResultFromTables(
   }
 
   const importedRows = buildImportedRows(selected.candidate.rows, selected.fieldDetection.columnMap)
-  const parsedStudents = parseStudentsFromTable(selected.candidate, selected.fieldDetection.columnMap)
-  const isOfficialStudentSource = isOfficialStudentSourceTable(selected.candidate, parsedStudents.length)
 
   return {
     fileName,
     fileKind,
     selectedTable: selected.candidate,
     candidates,
-    fieldDetection: selected.fieldDetection,
-    importedRows,
-    sourceStudents: isOfficialStudentSource ? parsedStudents : [],
-    isOfficialStudentSource,
+    ...buildSelectedTablePayload(selected.candidate, selected.fieldDetection, importedRows),
+  }
+}
+
+export function selectCandidateTable(result: ImportDetectionResult, candidateId: string): ImportDetectionResult {
+  const selectedTable = result.candidates.find((candidate) => candidate.id === candidateId)
+  if (!selectedTable) return result
+
+  const fieldDetection = detectRosterFields(selectedTable)
+  const importedRows = buildImportedRows(selectedTable.rows, fieldDetection.columnMap)
+
+  return {
+    ...result,
+    selectedTable,
+    ...buildSelectedTablePayload(selectedTable, fieldDetection, importedRows),
   }
 }
 
@@ -119,4 +128,20 @@ function isOfficialStudentSourceTable(table: CandidateTable, parsedStudentCount:
 
 function hasHeader(headers: string[], pattern: RegExp) {
   return headers.some((header) => pattern.test(header))
+}
+
+function buildSelectedTablePayload(
+  selectedTable: CandidateTable,
+  fieldDetection: FieldDetection,
+  importedRows: ReturnType<typeof buildImportedRows>,
+) {
+  const parsedStudents = parseStudentsFromTable(selectedTable, fieldDetection.columnMap)
+  const isOfficialStudentSource = isOfficialStudentSourceTable(selectedTable, parsedStudents.length)
+
+  return {
+    fieldDetection,
+    importedRows,
+    sourceStudents: isOfficialStudentSource ? parsedStudents : [],
+    isOfficialStudentSource,
+  }
 }

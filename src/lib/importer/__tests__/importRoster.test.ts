@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDetectionResultFromTables, buildUnsupportedResult } from '../importRoster'
+import { buildDetectionResultFromTables, buildUnsupportedResult, selectCandidateTable } from '../importRoster'
 import type { CandidateTable } from '../types'
 
 describe('buildDetectionResultFromTables', () => {
@@ -69,6 +69,38 @@ describe('buildDetectionResultFromTables', () => {
     ])
 
     expect(result.selectedTable?.sheetName).toBe('名單')
+  })
+
+  it('rebuilds rows and field detection when selecting another candidate', () => {
+    const result = buildDetectionResultFromTables('多工作表.xlsx', 'excel', [
+      {
+        id: '名單-1',
+        sourceName: '多工作表.xlsx',
+        sheetName: '名單',
+        headerRow: 1,
+        headers: ['班級', '座號', '姓名'],
+        rows: [{ 班級: '101', 座號: '1', 姓名: '邱紘睿' }],
+        rowCount: 1,
+      },
+      {
+        id: '候補-1',
+        sourceName: '多工作表.xlsx',
+        sheetName: '候補',
+        headerRow: 1,
+        headers: ['班別', '座次', '學生姓名'],
+        rows: [
+          { 班別: '102', 座次: '3', 學生姓名: '林小華' },
+          { 班別: '102', 座次: '4', 學生姓名: '陳小明' },
+        ],
+        rowCount: 2,
+      },
+    ])
+
+    const selected = selectCandidateTable(result, '候補-1')
+
+    expect(selected.selectedTable?.sheetName).toBe('候補')
+    expect(selected.importedRows).toHaveLength(2)
+    expect(selected.fieldDetection.columnMap.nameKey).toBe('學生姓名')
   })
 })
 

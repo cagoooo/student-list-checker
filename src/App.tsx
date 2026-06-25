@@ -22,7 +22,7 @@ import {
   subscribeCurrentUser,
 } from './lib/firebase'
 import { detectColumns, parseExcelTables } from './lib/importer/excel'
-import { importRosterFile } from './lib/importer/importRoster'
+import { importRosterFile, selectCandidateTable as selectImportCandidateTable } from './lib/importer/importRoster'
 import {
   applyStudentToRaw,
   buildImportedRows,
@@ -192,6 +192,20 @@ function App() {
     setRows((current) => current.map((row) => hydrateRow(row.raw, row.rowNo, next)))
   }
 
+  function selectCandidateTable(candidateId: string) {
+    if (!importDetection) return
+    const next = selectImportCandidateTable(importDetection, candidateId)
+    setImportDetection(next)
+    setRows(next.importedRows)
+    setColumnMap(next.fieldDetection.columnMap)
+
+    if (next.isOfficialStudentSource) {
+      setStudents(next.sourceStudents)
+      localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(next.sourceStudents))
+      setDatabaseMode('local')
+    }
+  }
+
   function applySuggestion(result: ValidationResult) {
     if (!result.suggestion) return
     setRows((current) =>
@@ -333,6 +347,14 @@ function App() {
                 <span key={warning}>{warning}</span>
               ))}
             </div>
+          ) : null}
+          {importDetection && importDetection.candidates.length > 1 ? (
+            <CandidateSelect
+              label="偵測表格"
+              value={importDetection.selectedTable?.id}
+              candidates={importDetection.candidates}
+              onChange={selectCandidateTable}
+            />
           ) : null}
           <ColumnSelect
             label="班級欄位"
@@ -511,6 +533,31 @@ function ColumnSelect({
   )
 }
 
+function CandidateSelect({
+  label,
+  value,
+  candidates,
+  onChange,
+}: {
+  label: string
+  value?: string
+  candidates: CandidateTable[]
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <select value={value ?? ''} onChange={(event) => onChange(event.target.value)}>
+        {candidates.map((candidate) => (
+          <option key={candidate.id} value={candidate.id}>
+            {candidateLabel(candidate)}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 function StatusBadge({ status }: { status: ValidationStatus }) {
   const icon =
     status === 'pass' ? (
@@ -573,6 +620,11 @@ function confidenceTone(confidence: number) {
   if (confidence >= 85) return 'high'
   if (confidence >= 60) return 'medium'
   return 'low'
+}
+
+function candidateLabel(candidate: CandidateTable) {
+  const sheetName = candidate.sheetName || candidate.sourceName
+  return `${sheetName}，第 ${candidate.headerRow} 列，${candidate.rowCount} 筆`
 }
 
 function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
