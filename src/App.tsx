@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
+  Copy,
   Download,
   FileSpreadsheet,
   RefreshCw,
@@ -22,6 +23,7 @@ import {
   subscribeCurrentUser,
 } from './lib/firebase'
 import { detectColumns, parseExcelTables } from './lib/importer/excel'
+import { summarizeImportDiagnostics } from './lib/importer/diagnostics'
 import { importRosterFile, selectCandidateTable as selectImportCandidateTable } from './lib/importer/importRoster'
 import {
   applyStudentToRaw,
@@ -206,6 +208,25 @@ function App() {
     }
   }
 
+  async function copyImportDiagnostics() {
+    if (!importDetection) return
+
+    const diagnostics = summarizeImportDiagnostics({
+      fileName: importDetection.fileName,
+      confidence: importDetection.fieldDetection.confidence,
+      headerRow: importDetection.selectedTable?.headerRow,
+      rowCount: importDetection.selectedTable?.rowCount ?? importDetection.importedRows.length,
+      warnings: importDetection.fieldDetection.warnings,
+    })
+
+    try {
+      await navigator.clipboard.writeText(diagnostics)
+      setMessage('已複製辨識報告，可貼給行政或資訊組長協助判讀。')
+    } catch {
+      setMessage('無法自動複製辨識報告，請確認瀏覽器剪貼簿權限。')
+    }
+  }
+
   function applySuggestion(result: ValidationResult) {
     if (!result.suggestion) return
     setRows((current) =>
@@ -347,6 +368,12 @@ function App() {
                 <span key={warning}>{warning}</span>
               ))}
             </div>
+          ) : null}
+          {importDetection ? (
+            <button type="button" className="ghost-button wide" onClick={copyImportDiagnostics}>
+              <Copy size={18} />
+              複製辨識報告
+            </button>
           ) : null}
           {importDetection && importDetection.candidates.length > 1 ? (
             <CandidateSelect
