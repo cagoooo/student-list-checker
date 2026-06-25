@@ -10,6 +10,7 @@ import {
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   getFirestore,
   serverTimestamp,
@@ -84,6 +85,21 @@ export async function signOutFirebase() {
   const currentRuntime = getFirebaseRuntime()
   if (!currentRuntime) return
   await signOut(getAuth(currentRuntime.app))
+}
+
+export async function checkIsAdmin() {
+  const currentRuntime = getFirebaseRuntime()
+  if (!currentRuntime) return false
+
+  const user = getAuth(currentRuntime.app).currentUser
+  if (!user) return false
+
+  try {
+    const snapshot = await getDoc(doc(currentRuntime.db, 'admins', user.uid))
+    return snapshot.exists()
+  } catch {
+    return false
+  }
 }
 
 export async function loadFirebaseStudents() {

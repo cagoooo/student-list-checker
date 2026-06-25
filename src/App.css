@@ -38,6 +38,17 @@
   background: #e9f7ef;
 }
 
+.readonly-note {
+  padding: 10px 12px;
+  border: 1px dashed #c3ccd6;
+  border-radius: 10px;
+  background: #f1f4f8;
+  color: #526071;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
 .topbar {
   display: flex;
   align-items: center;

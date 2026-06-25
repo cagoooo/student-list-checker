@@ -13,6 +13,7 @@ import {
 import * as XLSX from 'xlsx'
 import studentsData from './data/students.json'
 import {
+  checkIsAdmin,
   isFirebaseEnabled,
   loadFirebaseStudents,
   saveFirebaseStudents,
@@ -59,6 +60,7 @@ function App() {
   const [students, setStudents] = useState<Student[]>(() => loadStoredStudents() ?? DEFAULT_STUDENTS)
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => (loadStoredStudents() ? 'local' : 'demo'))
   const [userEmail, setUserEmail] = useState('')
+  const [isAdmin, setIsAdmin] = useState(false)
   const [fileName, setFileName] = useState('範例名單.xlsx')
   const [rows, setRows] = useState<ImportedRow[]>(() => buildImportedRows(SAMPLE_ROWS))
   const [columnMap, setColumnMap] = useState<ColumnMap>(() => detectColumns(Object.keys(SAMPLE_ROWS[0])))
@@ -74,13 +76,20 @@ function App() {
   const headers = useMemo(() => collectHeaders(rows), [rows])
   const results = useMemo(() => rows.map((row) => validateRow(row, students)), [rows, students])
   const stats = useMemo(() => summarize(results), [results])
+  // 登入 Firebase 後僅 admin 能更新資料庫；未設定 Firebase 或未登入時走本機模式，維持顯示。
+  const canUpdateDatabase = !(firebaseReady && userEmail) || isAdmin
 
   useEffect(() => {
     if (!firebaseReady) return undefined
 
     return subscribeCurrentUser(async (user) => {
       setUserEmail(user?.email ?? '')
-      if (!user) return
+      if (!user) {
+        setIsAdmin(false)
+        return
+      }
+
+      setIsAdmin(await checkIsAdmin())
 
       try {
         const firebaseStudents = await loadFirebaseStudents()
@@ -330,11 +339,17 @@ function App() {
             onChange={(value) => updateColumnMap('nameKey', value)}
           />
           <div className="action-stack">
-            <label className="ghost-button wide">
-              <Upload size={18} />
-              更新學生資料庫
-              <input type="file" accept=".xls,.xlsx" onChange={handleDatabaseFile} />
-            </label>
+            {canUpdateDatabase ? (
+              <label className="ghost-button wide">
+                <Upload size={18} />
+                更新學生資料庫
+                <input type="file" accept=".xls,.xlsx" onChange={handleDatabaseFile} />
+              </label>
+            ) : (
+              <p className="readonly-note">
+                您以校對權限登入，僅資訊組長可更新學生資料庫。
+              </p>
+            )}
             <button type="button" className="ghost-button wide" onClick={resetDatabase}>
               <RefreshCw size={18} />
               還原內建資料庫
