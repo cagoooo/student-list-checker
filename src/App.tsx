@@ -76,8 +76,8 @@ function App() {
   const headers = useMemo(() => collectHeaders(rows), [rows])
   const results = useMemo(() => rows.map((row) => validateRow(row, students)), [rows, students])
   const stats = useMemo(() => summarize(results), [results])
-  // 登入 Firebase 後僅 admin 能更新資料庫；未設定 Firebase 或未登入時走本機模式，維持顯示。
-  const canUpdateDatabase = !(firebaseReady && userEmail) || isAdmin
+  // Firebase 已設定時，必須具備 admin 權限才能更新資料庫；未設定 Firebase 才保留本機模式。
+  const canUpdateDatabase = !firebaseReady || isAdmin
 
   useEffect(() => {
     if (!firebaseReady) return undefined

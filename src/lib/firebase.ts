@@ -77,7 +77,7 @@ export async function signInWithGoogle() {
   }
 
   const provider = new GoogleAuthProvider()
-  provider.setCustomParameters({ hd: 'mail2.smes.tyc.edu.tw' })
+  provider.setCustomParameters({ hd: 'mail2.smes.tyc.edu.tw', prompt: 'select_account' })
   return signInWithPopup(getAuth(currentRuntime.app), provider)
 }
 
