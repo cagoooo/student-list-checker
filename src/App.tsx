@@ -22,6 +22,7 @@ import {
   subscribeCurrentUser,
 } from './lib/firebase'
 import { detectColumns, parseExcelTables } from './lib/importer/excel'
+import { importRosterFile } from './lib/importer/importRoster'
 import {
   applyStudentToRaw,
   buildImportedRows,
@@ -100,42 +101,34 @@ function App() {
     const file = event.target.files?.[0]
     if (!file) return
 
-    if (/\.(pdf|doc|docx)$/i.test(file.name)) {
-      setMessage('此版本先支援 Excel / CSV。PDF 與 Word 會在下一階段加入文字抽取與版面辨識。')
-      event.target.value = ''
-      return
-    }
-
     try {
-      const buffer = await file.arrayBuffer()
-      const imported = parsePrimaryExcelTable(buffer, file.name)
-      const columnMap = detectColumns(imported?.headers ?? [])
-      const sourceStudents = imported ? parseStudentsFromTable(imported, columnMap) : []
-      const isStudentSourceFile =
-        !!imported &&
-        sourceStudents.length > 0 &&
-        sourceStudents.length === imported.rows.length &&
-        hasHeader(imported.headers, /\u5b78\u865f/) &&
-        hasHeader(imported.headers, /\u6027\u5225/)
+      const imported = await importRosterFile(file)
+      const warningMessage = imported.fieldDetection.warnings.join('；')
 
-      if (!imported || imported.rows.length === 0) {
-        setMessage('檔案沒有可判讀的學生資料，請確認 Excel / CSV 內含班級、座號、姓名欄位。')
+      if (!imported.selectedTable || imported.importedRows.length === 0) {
+        setMessage(warningMessage || '找不到可辨識的名單資料，請確認檔案內含班級、座號與姓名。')
         return
       }
 
-      if (isStudentSourceFile) {
-        setStudents(sourceStudents)
-        localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(sourceStudents))
+      if (imported.isOfficialStudentSource) {
+        setStudents(imported.sourceStudents)
+        localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(imported.sourceStudents))
         setDatabaseMode('local')
       }
 
-      setRows(buildImportedRows(imported.rows, columnMap))
-      setColumnMap(columnMap)
+      setRows(imported.importedRows)
+      setColumnMap(imported.fieldDetection.columnMap)
       setFileName(file.name)
       setMessage(
-        isStudentSourceFile
-          ? `已偵測 ${file.name} 為學生資料原始檔，共 ${sourceStudents.length} 位學生，已先載入為本機校對基準。`
-          : `已讀取 ${file.name}，共 ${imported.rows.length} 筆資料。已自動使用第 ${imported.headerRow} 列作為欄位列。`,
+        imported.isOfficialStudentSource
+          ? `已偵測 ${file.name} 為學生資料原始檔，共 ${imported.sourceStudents.length} 位學生，已先載入為本機校對基準。`
+          : buildImportMessage(
+              file.name,
+              imported.importedRows.length,
+              imported.fieldDetection.confidence,
+              imported.fieldDetection.reasons,
+              warningMessage,
+            ),
       )
     } catch {
       setMessage('檔案讀取失敗，請確認格式為 .xlsx、.xls 或 .csv。')
@@ -546,8 +539,12 @@ function parsePrimaryExcelTable(buffer: ArrayBuffer, sourceName: string): Candid
   return parseExcelTables(buffer, sourceName).sort((a, b) => b.rowCount - a.rowCount)[0] ?? null
 }
 
-function hasHeader(headers: string[], pattern: RegExp) {
-  return headers.some((header) => pattern.test(header))
+function buildImportMessage(fileName: string, rowCount: number, confidence: number, reasons: string[], warning?: string) {
+  if (confidence >= 85) {
+    return `已讀取 ${fileName}，共 ${rowCount} 筆資料。${reasons.join('，')}。`
+  }
+
+  return `已讀取 ${fileName}，共 ${rowCount} 筆資料，但欄位由系統推測，請確認左側欄位對應。${warning ? ` ${warning}` : ''}`
 }
 
 function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
