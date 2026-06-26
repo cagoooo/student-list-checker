@@ -335,6 +335,7 @@ export const processOcrJob = onObjectFinalized(
         resultValidationId: validationId,
         resultSummary: report.summary,
         resultIssueCount: report.issues.length,
+        resultIssues: report.issues,
         errorMessage: null,
       })
     } catch (error) {

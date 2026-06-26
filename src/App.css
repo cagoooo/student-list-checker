@@ -233,6 +233,78 @@ h2 {
   white-space: nowrap;
 }
 
+.ocr-progress {
+  display: grid;
+  gap: 8px;
+  max-width: 620px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid #c8d4de;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.ocr-progress__header,
+.ocr-progress__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ocr-progress__header span {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.ocr-progress__header strong {
+  color: #25635a;
+  font-size: 14px;
+}
+
+.ocr-progress__bar {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: #e4e9ef;
+}
+
+.ocr-progress__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2f8f65;
+  transition: width 240ms ease;
+}
+
+.ocr-progress__meta {
+  flex-wrap: wrap;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ocr-progress p {
+  margin: 0;
+  color: #526071;
+  font-size: 13px;
+}
+
+.ocr-progress-success {
+  border-color: #9fd5ba;
+  background: #f4fbf7;
+}
+
+.ocr-progress-danger {
+  border-color: #e8aaa4;
+  background: #fff7f6;
+}
+
+.ocr-progress-danger .ocr-progress__bar span {
+  background: #c64c42;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

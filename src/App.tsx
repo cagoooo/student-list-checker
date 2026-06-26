@@ -15,9 +15,11 @@ import {
   validateRosterRowsOnBackend,
   validateRosterFileOnBackend,
   createOcrJobOnBackend,
+  subscribeOcrJobStatus,
   type BackendValidationIssue,
   type BackendRosterRow,
   type BackendValidationReport,
+  type BackendOcrJobStatus,
 } from './lib/backendValidation'
 import {
   checkIsAdmin,
@@ -73,6 +75,7 @@ function App() {
   const [importDetection, setImportDetection] = useState<ImportDetectionResult | null>(null)
   const [backendReport, setBackendReport] = useState<BackendValidationReport | null>(null)
   const [backendStatus, setBackendStatus] = useState<'local' | 'checking' | 'ready' | 'fallback'>('local')
+  const [activeOcrJob, setActiveOcrJob] = useState<BackendOcrJobStatus | null>(null)
   const [message, setMessage] = useState(
     `已載入 ${DEFAULT_STUDENTS.length} 位學生資料，可直接測試名單檢查流程。`,
   )
@@ -82,18 +85,73 @@ function App() {
     registerServiceWorker(() => setUpdateReady(true))
   }, [])
 
+  useEffect(() => {
+    if (!activeOcrJob?.jobId || activeOcrJob.status === 'completed' || activeOcrJob.status === 'failed') {
+      return undefined
+    }
+
+    return subscribeOcrJobStatus(activeOcrJob.jobId, (job) => {
+      if (!job) {
+        setActiveOcrJob((current) =>
+          current?.jobId === activeOcrJob.jobId
+            ? { ...current, status: 'failed', progress: 100, errorMessage: '找不到 OCR 工作紀錄。' }
+            : current,
+        )
+        setBackendStatus('fallback')
+        return
+      }
+
+      setActiveOcrJob(job)
+      if (job.status === 'completed') {
+        if (job.resultSummary) {
+          setBackendReport({
+            validationId: job.resultValidationId,
+            summary: job.resultSummary,
+            issues: job.resultIssues ?? [],
+          })
+        }
+        setBackendStatus('ready')
+        setMessage(
+          `掃描 PDF 背景辨識已完成；校對紀錄編號：${job.resultValidationId ?? job.jobId}。`,
+        )
+        return
+      }
+
+      if (job.status === 'failed') {
+        setBackendStatus('fallback')
+        setMessage(job.errorMessage ? `OCR 背景辨識失敗：${job.errorMessage}` : 'OCR 背景辨識失敗。')
+        return
+      }
+
+      setBackendStatus('checking')
+      if (job.message) setMessage(job.message)
+    })
+  }, [activeOcrJob?.jobId, activeOcrJob?.status])
+
   const headers = useMemo(() => collectHeaders(rows), [rows])
   const results = useMemo(() => rows.map((row) => validateRow(row, students)), [rows, students])
   const issueResults = useMemo(() => results.filter((result) => result.status !== 'pass'), [results])
   const localStats = useMemo(() => summarize(results), [results])
-  const stats = backendReport?.summary ?? localStats
+  const isOcrJobPending = activeOcrJob?.status === 'queued' || activeOcrJob?.status === 'processing'
+  const isOcrJobIncomplete = isOcrJobPending || activeOcrJob?.status === 'failed'
+  const pendingOcrStats = { total: 0, pass: 0, warning: 0, error: 0, usable: false }
+  const stats = activeOcrJob?.resultSummary ?? (isOcrJobIncomplete ? pendingOcrStats : backendReport?.summary ?? localStats)
   const displayIssues = useMemo(
-    () => (backendReport ? backendReport.issues.map(backendIssueToDisplayIssue) : issueResults),
-    [backendReport, issueResults],
+    () => (isOcrJobIncomplete ? [] : backendReport ? backendReport.issues.map(backendIssueToDisplayIssue) : issueResults),
+    [backendReport, isOcrJobIncomplete, issueResults],
   )
   const totalCount = backendReport?.summary.total ?? results.length
-  const validationId = backendReport?.validationId
-  const reportTone = stats.error > 0 ? 'danger' : stats.warning > 0 ? 'warning' : 'success'
+  const displayTotalCount = activeOcrJob?.resultSummary?.total ?? (isOcrJobIncomplete ? 0 : totalCount)
+  const validationId = backendReport?.validationId ?? activeOcrJob?.resultValidationId
+  const reportTone = activeOcrJob?.status === 'failed'
+    ? 'danger'
+    : isOcrJobPending
+      ? 'warning'
+      : stats.error > 0
+        ? 'danger'
+        : stats.warning > 0
+          ? 'warning'
+          : 'success'
   // Firebase 已設定時，必須具備 admin 權限才能更新資料庫；未設定 Firebase 才保留本機模式。
   const canUpdateDatabase = !firebaseReady || isAdmin
 
@@ -164,6 +222,7 @@ function App() {
     if (!file) return
 
     try {
+      setActiveOcrJob(null)
       if (firebaseReady && userEmail && canBackendValidateFile(file)) {
         try {
           setMessage(`正在交由後端辨識與校對 ${file.name}…`)
@@ -188,6 +247,13 @@ function App() {
               setBackendStatus('checking')
               setImportDetection(null)
               setFileName(file.name)
+              setActiveOcrJob({
+                jobId: job.jobId,
+                fileName: file.name,
+                status: job.status,
+                progress: 0,
+                message: job.message,
+              })
               setMessage(`掃描型 PDF 已建立背景辨識工作：${job.jobId}。${job.message}`)
               return
             }
@@ -407,12 +473,13 @@ function App() {
             資料庫來源：{databaseModeLabel(databaseMode)}，目前載入 {students.length} 位學生；校對模式：{backendModeLabel(backendStatus)}
             {validationId ? `；紀錄編號：${validationId}` : ''}
           </p>
+          {activeOcrJob ? <OcrJobProgress job={activeOcrJob} /> : null}
         </div>
         <div className="metric-grid" aria-label="校對統計">
           <Metric label="通過" value={stats.pass} tone="success" />
           <Metric label="待確認" value={stats.warning} tone="warning" />
           <Metric label="錯誤" value={stats.error} tone="danger" />
-          <Metric label="總筆數" value={totalCount} tone="neutral" />
+          <Metric label="總筆數" value={displayTotalCount} tone="neutral" />
         </div>
       </section>
 
@@ -499,8 +566,8 @@ function App() {
               {reportTone === 'success' ? <CheckCircle2 size={28} /> : <AlertTriangle size={28} />}
             </div>
             <div>
-              <h2>{reportTitle(stats)}</h2>
-              <p>{reportDescription(stats, displayIssues.length)}</p>
+              <h2>{activeOcrJob ? ocrReportTitle(activeOcrJob) : reportTitle(stats)}</h2>
+              <p>{activeOcrJob ? ocrReportDescription(activeOcrJob) : reportDescription(stats, displayIssues.length)}</p>
             </div>
           </div>
           <div className="table-toolbar">
@@ -525,9 +592,25 @@ function App() {
 
           {displayIssues.length === 0 ? (
             <div className="empty-report">
-              <CheckCircle2 size={42} />
-              <strong>目前沒有發現姓名或班級座號問題</strong>
-              <span>這份名單共 {totalCount} 筆，系統比對結果皆為通過。</span>
+              {activeOcrJob?.status === 'processing' || activeOcrJob?.status === 'queued' ? (
+                <>
+                  <RefreshCw size={42} />
+                  <strong>正在背景辨識掃描 PDF</strong>
+                  <span>完成後會更新校對摘要；老師可以先停留在這個畫面等待進度條跑完。</span>
+                </>
+              ) : activeOcrJob?.status === 'failed' ? (
+                <>
+                  <AlertTriangle size={42} />
+                  <strong>掃描 PDF 尚未完成校對</strong>
+                  <span>{activeOcrJob.errorMessage ?? '背景辨識失敗，請改用較清晰的 PDF，或先轉成 Excel / CSV 再上傳。'}</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={42} />
+                  <strong>目前沒有發現姓名或班級座號問題</strong>
+                  <span>這份名單共 {displayTotalCount} 筆，系統比對結果皆為通過。</span>
+                </>
+              )}
             </div>
           ) : (
             <div className="table-wrap">
@@ -605,6 +688,34 @@ function Metric({
     <div className={`metric metric-${tone}`}>
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  )
+}
+
+function OcrJobProgress({ job }: { job: BackendOcrJobStatus }) {
+  const tone = job.status === 'failed' ? 'danger' : job.status === 'completed' ? 'success' : 'active'
+  const progress = job.status === 'queued' ? Math.max(job.progress, 4) : job.progress
+  return (
+    <div className={`ocr-progress ocr-progress-${tone}`} role="status">
+      <div className="ocr-progress__header">
+        <span>{ocrStatusLabel(job.status)}</span>
+        <strong>{job.status === 'failed' ? '未完成' : `${progress}%`}</strong>
+      </div>
+      <div
+        className="ocr-progress__bar"
+        role="progressbar"
+        aria-label="OCR 背景辨識進度"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={job.status === 'failed' ? 100 : progress}
+      >
+        <span style={{ width: `${job.status === 'failed' ? 100 : progress}%` }} />
+      </div>
+      <div className="ocr-progress__meta">
+        <span>工作編號：{job.jobId}</span>
+        {job.resultValidationId ? <span>校對紀錄：{job.resultValidationId}</span> : null}
+      </div>
+      <p>{job.errorMessage ?? job.message}</p>
     </div>
   )
 }
@@ -907,6 +1018,37 @@ function reportDescription(stats: Record<ValidationStatus, number>, issueCount: 
     return `沒有明確錯誤，但有 ${stats.warning} 筆姓名或位置需要人工看一下。`
   }
   return `共 ${stats.pass} 筆資料通過比對，沒有發現姓名 KEY 錯或班級座號不符。`
+}
+
+function ocrStatusLabel(status: BackendOcrJobStatus['status']) {
+  return {
+    queued: '等待背景辨識',
+    processing: '背景辨識中',
+    completed: '辨識與校對完成',
+    failed: '背景辨識失敗',
+  }[status]
+}
+
+function ocrReportTitle(job: BackendOcrJobStatus) {
+  if (job.status === 'completed') return '掃描 PDF 已完成後端校對'
+  if (job.status === 'failed') return '掃描 PDF 尚未完成校對'
+  return '掃描 PDF 正在背景辨識'
+}
+
+function ocrReportDescription(job: BackendOcrJobStatus) {
+  if (job.status === 'completed') {
+    const summary = job.resultSummary
+    if (!summary) return `已完成背景辨識；校對紀錄編號：${job.resultValidationId ?? job.jobId}。`
+    if (summary.error > 0) return `完成 ${summary.total} 筆校對，其中 ${summary.error} 筆錯誤、${summary.warning} 筆待確認。`
+    if (summary.warning > 0) return `完成 ${summary.total} 筆校對，其中 ${summary.warning} 筆需要老師確認。`
+    return `完成 ${summary.total} 筆校對，目前沒有發現姓名或班級座號問題。`
+  }
+
+  if (job.status === 'failed') {
+    return job.errorMessage ?? '背景辨識未完成，請改用較清晰的 PDF，或先轉成 Excel / CSV 再上傳。'
+  }
+
+  return '系統正在背景處理，老師不用重新上傳；請等待進度條完成。'
 }
 
 function nameMatchLabel(level: 'high' | 'medium' | 'low') {
