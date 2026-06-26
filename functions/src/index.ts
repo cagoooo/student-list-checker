@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import ExcelJS from 'exceljs'
+import mammoth from 'mammoth'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import { setGlobalOptions } from 'firebase-functions/options'
 
@@ -64,7 +65,7 @@ type FileValidationRequest = {
 type FileValidationResponse = ValidationResponse & {
   rows: RosterRowInput[]
   parser: {
-    fileKind: 'xlsx' | 'csv'
+    fileKind: 'xlsx' | 'csv' | 'docx'
     rowCount: number
     confidence: number
     warnings: string[]
@@ -198,11 +199,32 @@ async function parseRosterFile(fileName: string, buffer: Buffer) {
     })
     return rowsToRosterRows(rows, 'xlsx' as const)
   }
+  if (/\.docx$/i.test(fileName)) {
+    const tableRows = await docxTableRows(buffer)
+    if (tableRows.length > 0) return rowsToRosterRows(tableRows, 'docx' as const)
 
-  throw new HttpsError('invalid-argument', '後端目前先支援 .xlsx 與 .csv，其他格式會由前端既有管線處理。')
+    const textRows = await docxTextRows(buffer)
+    return rowsToRosterRows(textRows, 'docx' as const)
+  }
+
+  throw new HttpsError('invalid-argument', '後端目前先支援 .xlsx、.csv 與 .docx，其他格式會由前端既有管線處理。')
 }
 
-function rowsToRosterRows(rows: string[][], fileKind: 'xlsx' | 'csv') {
+async function docxTableRows(buffer: Buffer) {
+  const result = await mammoth.convertToHtml({ buffer })
+  return tablesFromHtml(result.value)
+}
+
+async function docxTextRows(buffer: Buffer) {
+  const result = await mammoth.extractRawText({ buffer })
+  return result.value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(splitTextLine)
+}
+
+function rowsToRosterRows(rows: string[][], fileKind: 'xlsx' | 'csv' | 'docx') {
   const nonEmptyRows = rows.filter((row) => row.some((cell) => toText(cell)))
   if (nonEmptyRows.length < 1) {
     throw new HttpsError('invalid-argument', '檔案中沒有可校對的名單資料。')
@@ -359,6 +381,46 @@ function cellToText(value: unknown): string {
     if (Array.isArray(record.richText)) return record.richText.map((part) => toText(part.text)).join('')
   }
   return toText(value)
+}
+
+function tablesFromHtml(html: string) {
+  const rows: string[][] = []
+  const tableMatches = html.match(/<table[\s\S]*?<\/table>/gi) ?? []
+  for (const tableHtml of tableMatches) {
+    const rowMatches = tableHtml.match(/<tr[\s\S]*?<\/tr>/gi) ?? []
+    for (const rowHtml of rowMatches) {
+      const cells = [...rowHtml.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)]
+        .map((match) => decodeHtml(stripTags(match[1])))
+        .map((cell) => cell.trim())
+      if (cells.some(Boolean)) rows.push(cells)
+    }
+    if (rows.length > 0) break
+  }
+  return rows
+}
+
+function splitTextLine(line: string) {
+  const tabCells = line.split(/\t+/).map((cell) => cell.trim()).filter(Boolean)
+  if (tabCells.length >= 3) return tabCells
+  const wideCells = line.split(/\s{2,}/).map((cell) => cell.trim()).filter(Boolean)
+  if (wideCells.length >= 3) return wideCells
+
+  const match = line.match(/^([一二三四五六七八九\d]{1,3}(?:年?[一二三四五六七八九\d甲乙丙丁戊]+班?)?)\s*([0-9]{1,2})\s*([\u4e00-\u9fff]{2,5})/)
+  return match ? [match[1], match[2], match[3]] : [line]
+}
+
+function stripTags(value: string) {
+  return value.replace(/<[^>]+>/g, '')
+}
+
+function decodeHtml(value: string) {
+  return value
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
 }
 
 function parseCsv(text: string) {

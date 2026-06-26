@@ -876,7 +876,7 @@ function backendRowToImportedRow(row: BackendRosterRow, index: number): Imported
 }
 
 function canBackendValidateFile(file: File) {
-  return /\.(xlsx|csv)$/i.test(file.name) && file.size <= 7 * 1024 * 1024
+  return /\.(xlsx|csv|docx)$/i.test(file.name) && file.size <= 7 * 1024 * 1024
 }
 
 function reportTitle(stats: Record<ValidationStatus, number>) {
