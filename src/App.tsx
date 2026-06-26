@@ -13,7 +13,9 @@ import * as XLSX from 'xlsx'
 import studentsData from './data/students.json'
 import {
   validateRosterRowsOnBackend,
+  validateRosterFileOnBackend,
   type BackendValidationIssue,
+  type BackendRosterRow,
   type BackendValidationReport,
 } from './lib/backendValidation'
 import {
@@ -56,6 +58,7 @@ const SAMPLE_ROWS = [
   { 班級: '6年6班', 座號: '26', 姓名: '不存在', 項目: '美術獎' },
 ]
 const SAMPLE_COLUMN_MAP = detectColumns(Object.keys(SAMPLE_ROWS[0]))
+const BACKEND_COLUMN_MAP: ColumnMap = { classKey: '班級', seatKey: '座號', nameKey: '姓名' }
 
 function App() {
   const firebaseReady = isFirebaseEnabled()
@@ -159,6 +162,29 @@ function App() {
     if (!file) return
 
     try {
+      if (firebaseReady && userEmail && canBackendValidateFile(file)) {
+        try {
+          setMessage(`正在交由後端辨識與校對 ${file.name}…`)
+          const backend = await validateRosterFileOnBackend(file)
+          if (backend) {
+            setRows(backend.rows.map(backendRowToImportedRow))
+            setColumnMap(BACKEND_COLUMN_MAP)
+            setImportDetection(null)
+            setBackendReport(backend)
+            setBackendStatus('ready')
+            setFileName(file.name)
+            setMessage(
+              `後端已完成 ${file.name} 的辨識與校對，共 ${backend.summary.total} 筆；下方只列出需要確認的項目。`,
+            )
+            return
+          }
+        } catch {
+          setBackendReport(null)
+          setBackendStatus('fallback')
+          setMessage('後端檔案校對暫不可用，已改用本機辨識流程。')
+        }
+      }
+
       setMessage(`正在讀取與辨識 ${file.name}…`)
       const imported = await importRosterFile(file, {
         onOcrProgress: ({ page, total }) =>
@@ -829,6 +855,28 @@ function backendIssueToDisplayIssue(issue: BackendValidationIssue): ValidationRe
       : undefined,
     confidence: issue.confidence,
   }
+}
+
+function backendRowToImportedRow(row: BackendRosterRow, index: number): ImportedRow {
+  const rowNo = Number(row.rowNo ?? index + 1)
+  const raw = {
+    班級: row.classValue ?? '',
+    座號: row.seatNo ?? '',
+    姓名: row.name ?? '',
+  }
+  return {
+    id: row.id ?? `backend-row-${rowNo}`,
+    rowNo,
+    sourceLabel: row.sourceLabel,
+    raw,
+    classValue: row.classValue ?? '',
+    seatNo: row.seatNo ?? '',
+    name: row.name ?? '',
+  }
+}
+
+function canBackendValidateFile(file: File) {
+  return /\.(xlsx|csv)$/i.test(file.name) && file.size <= 7 * 1024 * 1024
 }
 
 function reportTitle(stats: Record<ValidationStatus, number>) {

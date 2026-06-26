@@ -29,7 +29,7 @@
 | 學生資料庫種子 | 已完成 | 已從本機學務系統匯出檔匯入 795 位學生，公開版已匿名化 | 輸出至 `src/data/students.json` |
 | 學生資料庫更新 | 已完成 | 前端可上傳新的學生資料概況 `.xls` 更新本機資料庫 | 目前暫存於瀏覽器 `localStorage` |
 | Firebase SDK | 已完成 | 已加入 Firebase 初始化、Google 登入、Firestore 讀寫服務 | 未設定 env 時會退回匿名示範模式 |
-| Firebase Functions | 已完成第一版 | 新增 `validateRosterRows` 後端校對函式，從 Firestore 讀學生資料並回傳 summary / issues | 尚待部署至正式 Firebase project |
+| Firebase Functions | 已完成第一版 | 新增 `validateRosterRows` / `validateRosterFile` 後端函式，支援後端校對與 `.xlsx` / `.csv` 後端解析 | 尚待部署至正式 Firebase project |
 | Firestore 資料模型 | 已完成 | 已定義 `students`、`studentDatabaseMeta`、`admins` | 詳見 `FIREBASE_SETUP.md` |
 | Firestore 安全規則 | 已完成 | 預設拒絕；僅 `admins/{uid}` 可讀寫學生資料 | 需部署到 Firebase project |
 | GitHub Secrets 串接 | 已完成 | GitHub Actions 已可接收 `VITE_FIREBASE_*` secrets | 尚待填入正式 Firebase Web App config |
@@ -61,9 +61,9 @@
 
 | 優先 | 工作項目 | 原因 |
 |---|---|---|
-| P0 | 將 Excel 解析移到後端或替換安全套件 | 避免前端直接處理不可信檔案，降低上線風險 |
+| P0 | 將 Excel 解析移到後端或替換安全套件 | `.xlsx` / `.csv` 後端解析第一版已完成，仍需部署與擴充 `.xls` / PDF / Word |
 | P0 | 建立正式後端 API 與資料庫 | 後端負責辨識、比對與回傳校對結果，前端只呈現是否正確與問題清單 |
-| P0 | 後端化檔案辨識 | 後端校對函式已完成第一版；下一步把 Excel / PDF / Word 解析也搬到後端隔離環境 |
+| P0 | 後端化檔案辨識 | `.xlsx` / `.csv` 已可走 Functions 後端；下一步擴充 PDF / Word / OCR 後端解析 |
 | P1 | 擴充中文姓名校正字典 | 第一版已支援常見異體 / 形近 / 同音，後續可依石門國小實際名冊誤植回饋擴充 |
 | P1 | 增加登入與角色權限 | 區分老師、行政、系統管理員 |
 | P1 | 增加校對紀錄與下載紀錄 | 行政流程需要追蹤責任與版本 |

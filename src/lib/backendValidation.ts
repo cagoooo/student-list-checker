@@ -36,6 +36,16 @@ export type BackendValidationReport = {
   issues: BackendValidationIssue[]
 }
 
+export type BackendFileValidationReport = BackendValidationReport & {
+  rows: BackendRosterRow[]
+  parser: {
+    fileKind: 'xlsx' | 'csv'
+    rowCount: number
+    confidence: number
+    warnings: string[]
+  }
+}
+
 export async function validateRosterRowsOnBackend(rows: BackendRosterRow[]) {
   const runtime = getFirebaseRuntime()
   if (!runtime) return null
@@ -48,4 +58,32 @@ export async function validateRosterRowsOnBackend(rows: BackendRosterRow[]) {
   )
   const result = await validateRosterRows({ rows })
   return result.data
+}
+
+export async function validateRosterFileOnBackend(file: File) {
+  const runtime = getFirebaseRuntime()
+  if (!runtime) return null
+
+  const region = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'asia-east1'
+  const functions = getFunctions(runtime.app, region)
+  const validateRosterFile = httpsCallable<
+    { fileName: string; contentBase64: string },
+    BackendFileValidationReport
+  >(functions, 'validateRosterFile')
+
+  const contentBase64 = await fileToBase64(file)
+  const result = await validateRosterFile({ fileName: file.name, contentBase64 })
+  return result.data
+}
+
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result ?? '')
+      resolve(result.replace(/^data:.*;base64,/, ''))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('File read failed'))
+    reader.readAsDataURL(file)
+  })
 }

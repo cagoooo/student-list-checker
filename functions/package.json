@@ -13,6 +13,7 @@
     "logs": "firebase functions:log"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "firebase-admin": "^13.6.0",
     "firebase-functions": "^7.2.5"
   },

@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
+import ExcelJS from 'exceljs'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import { setGlobalOptions } from 'firebase-functions/options'
 
@@ -55,6 +56,21 @@ type ValidationResponse = {
   issues: ValidationIssue[]
 }
 
+type FileValidationRequest = {
+  fileName: string
+  contentBase64: string
+}
+
+type FileValidationResponse = ValidationResponse & {
+  rows: RosterRowInput[]
+  parser: {
+    fileKind: 'xlsx' | 'csv'
+    rowCount: number
+    confidence: number
+    warnings: string[]
+  }
+}
+
 const digitAliases: Record<string, string> = {
   一: '1',
   二: '2',
@@ -84,36 +100,38 @@ initializeApp()
 setGlobalOptions({ region: 'asia-east1', maxInstances: 10 })
 
 export const validateRosterRows = onCall<{ rows: RosterRowInput[] }, Promise<ValidationResponse>>(async (request) => {
-  const email = request.auth?.token.email
-  if (!email || !isSchoolEmail(email)) {
-    throw new HttpsError('permission-denied', '請使用石門國小 Google 帳號登入後再校對名單。')
-  }
-
-  const rows = Array.isArray(request.data?.rows) ? request.data.rows : []
-  if (rows.length === 0) {
-    throw new HttpsError('invalid-argument', '缺少可校對的名單資料。')
-  }
-  if (rows.length > 2000) {
-    throw new HttpsError('invalid-argument', '單次校對最多支援 2000 筆資料。')
-  }
-
+  assertSchoolCaller(request.auth?.token.email)
+  const rows = assertRows(request.data?.rows)
   const students = await loadStudents()
-  const results = rows.map((row) => validateRow(row, students))
-  const summary = results.reduce(
-    (sum, result) => {
-      sum[result.status] += 1
-      return sum
-    },
-    { pass: 0, warning: 0, error: 0 },
-  )
+  return validateRows(rows, students)
+})
 
+export const validateRosterFile = onCall<FileValidationRequest, Promise<FileValidationResponse>>(async (request) => {
+  assertSchoolCaller(request.auth?.token.email)
+
+  const fileName = toText(request.data?.fileName)
+  const contentBase64 = toText(request.data?.contentBase64)
+  if (!fileName || !contentBase64) {
+    throw new HttpsError('invalid-argument', '缺少檔名或檔案內容。')
+  }
+  if (contentBase64.length > 10 * 1024 * 1024) {
+    throw new HttpsError('invalid-argument', '檔案太大，請先拆成較小名單後再上傳。')
+  }
+
+  const buffer = Buffer.from(contentBase64, 'base64')
+  const parsed = await parseRosterFile(fileName, buffer)
+  const rows = assertRows(parsed.rows)
+  const students = await loadStudents()
+  const report = validateRows(rows, students)
   return {
-    summary: {
-      total: rows.length,
-      ...summary,
-      usable: summary.error === 0 && summary.warning === 0,
+    ...report,
+    rows,
+    parser: {
+      fileKind: parsed.fileKind,
+      rowCount: rows.length,
+      confidence: parsed.confidence,
+      warnings: parsed.warnings,
     },
-    issues: results.filter((result): result is ValidationIssue => result.status !== 'pass'),
   }
 })
 
@@ -133,6 +151,252 @@ async function loadStudents(): Promise<Student[]> {
       gender: toText(data.gender),
     }
   })
+}
+
+function validateRows(rows: RosterRowInput[], students: Student[]): ValidationResponse {
+  const results = rows.map((row) => validateRow(row, students))
+  const summary = results.reduce(
+    (sum, result) => {
+      sum[result.status] += 1
+      return sum
+    },
+    { pass: 0, warning: 0, error: 0 },
+  )
+
+  return {
+    summary: {
+      total: rows.length,
+      ...summary,
+      usable: summary.error === 0 && summary.warning === 0,
+    },
+    issues: results.filter((result): result is ValidationIssue => result.status !== 'pass'),
+  }
+}
+
+async function parseRosterFile(fileName: string, buffer: Buffer) {
+  if (/\.csv$/i.test(fileName)) {
+    return rowsToRosterRows(parseCsv(buffer.toString('utf8')), 'csv' as const)
+  }
+  if (/\.xlsx$/i.test(fileName)) {
+    const workbook = new ExcelJS.Workbook()
+    const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer
+    await workbook.xlsx.load(arrayBuffer)
+    const worksheet = workbook.worksheets
+      .map((sheet) => ({
+        sheet,
+        rowCount: sheet.actualRowCount,
+      }))
+      .sort((a, b) => b.rowCount - a.rowCount)[0]?.sheet
+    if (!worksheet) {
+      throw new HttpsError('invalid-argument', 'Excel 檔案中找不到可讀取的工作表。')
+    }
+
+    const rows: string[][] = []
+    worksheet.eachRow((row) => {
+      const values = Array.isArray(row.values) ? row.values.slice(1) : []
+      rows.push(values.map((value) => cellToText(value)))
+    })
+    return rowsToRosterRows(rows, 'xlsx' as const)
+  }
+
+  throw new HttpsError('invalid-argument', '後端目前先支援 .xlsx 與 .csv，其他格式會由前端既有管線處理。')
+}
+
+function rowsToRosterRows(rows: string[][], fileKind: 'xlsx' | 'csv') {
+  const nonEmptyRows = rows.filter((row) => row.some((cell) => toText(cell)))
+  if (nonEmptyRows.length < 1) {
+    throw new HttpsError('invalid-argument', '檔案中沒有可校對的名單資料。')
+  }
+
+  const headerIndex = findHeaderRow(nonEmptyRows)
+  const headers = headerIndex >= 0 ? normalizeHeaders(nonEmptyRows[headerIndex]) : synthesizeHeaders(nonEmptyRows)
+  const dataRows = headerIndex >= 0 ? nonEmptyRows.slice(headerIndex + 1) : nonEmptyRows
+  const columnMap = detectColumnMap(headers, dataRows)
+  const warnings = [
+    columnMap.classIndex < 0 ? '找不到班級欄位' : '',
+    columnMap.seatIndex < 0 ? '找不到座號欄位' : '',
+    columnMap.nameIndex < 0 ? '找不到姓名欄位' : '',
+  ].filter(Boolean)
+
+  const rosterRows = dataRows
+    .map((row, index) => ({
+      id: `backend-${index + 1}`,
+      rowNo: (headerIndex >= 0 ? headerIndex + 2 : 1) + index,
+      classValue: columnValue(row, columnMap.classIndex),
+      seatNo: columnValue(row, columnMap.seatIndex),
+      name: columnValue(row, columnMap.nameIndex),
+    }))
+    .filter((row) => row.classValue || row.seatNo || row.name)
+
+  if (rosterRows.length === 0) {
+    throw new HttpsError('invalid-argument', '檔案中沒有可校對的班級、座號與姓名資料。')
+  }
+
+  const confidence = Math.max(0, 100 - warnings.length * 28 - (headerIndex < 0 ? 12 : 0))
+  return {
+    fileKind,
+    rows: rosterRows,
+    confidence,
+    warnings,
+  }
+}
+
+function assertSchoolCaller(email: unknown) {
+  const text = toText(email)
+  if (!text || !isSchoolEmail(text)) {
+    throw new HttpsError('permission-denied', '請使用石門國小 Google 帳號登入後再校對名單。')
+  }
+}
+
+function assertRows(value: unknown): RosterRowInput[] {
+  const rows = Array.isArray(value) ? value : []
+  if (rows.length === 0) {
+    throw new HttpsError('invalid-argument', '缺少可校對的名單資料。')
+  }
+  if (rows.length > 2000) {
+    throw new HttpsError('invalid-argument', '單次校對最多支援 2000 筆資料。')
+  }
+  return rows.map((row, index) => {
+    const record = row && typeof row === 'object' ? row as Record<string, unknown> : {}
+    return {
+      id: toText(record.id) || `row-${index + 1}`,
+      rowNo: Number(record.rowNo ?? index + 1),
+      sourceLabel: toText(record.sourceLabel) || undefined,
+      classValue: toText(record.classValue),
+      seatNo: toText(record.seatNo),
+      name: toText(record.name),
+    }
+  })
+}
+
+function findHeaderRow(rows: string[][]) {
+  return rows.findIndex((row) => {
+    const headers = normalizeHeaders(row)
+    const map = detectHeaderMap(headers)
+    return [map.classIndex, map.seatIndex, map.nameIndex].filter((index) => index >= 0).length >= 2
+  })
+}
+
+function normalizeHeaders(row: string[]) {
+  const used = new Map<string, number>()
+  return row.map((cell, index) => {
+    const base = toText(cell).replace(/\s+/g, '') || `欄位${index + 1}`
+    const count = used.get(base) ?? 0
+    used.set(base, count + 1)
+    return count === 0 ? base : `${base}_${count + 1}`
+  })
+}
+
+function synthesizeHeaders(rows: string[][]) {
+  const width = Math.max(...rows.map((row) => row.length), 0)
+  return Array.from({ length: width }, (_, index) => `欄位${index + 1}`)
+}
+
+function detectColumnMap(headers: string[], rows: string[][]) {
+  const headerMap = detectHeaderMap(headers)
+  return {
+    classIndex: headerMap.classIndex >= 0 ? headerMap.classIndex : bestColumn(rows, scoreClassValue),
+    seatIndex: headerMap.seatIndex >= 0 ? headerMap.seatIndex : bestColumn(rows, scoreSeatValue),
+    nameIndex: headerMap.nameIndex >= 0 ? headerMap.nameIndex : bestColumn(rows, scoreNameValue),
+  }
+}
+
+function detectHeaderMap(headers: string[]) {
+  return {
+    classIndex: headers.findIndex((header) => /^(班級|班別|班|年班|class)$/i.test(header)),
+    seatIndex: headers.findIndex((header) => /^(座號|座次|號碼|編號|座位|seat|number)$/i.test(header)),
+    nameIndex: headers.findIndex((header) => /^(姓名|學生姓名|名字|學生|name)$/i.test(header)),
+  }
+}
+
+function bestColumn(rows: string[][], scorer: (value: string) => number) {
+  const width = Math.max(...rows.map((row) => row.length), 0)
+  let bestIndex = -1
+  let bestScore = 0
+  for (let index = 0; index < width; index += 1) {
+    const values = rows.map((row) => columnValue(row, index)).filter(Boolean)
+    if (values.length === 0) continue
+    const score = values.reduce((sum, value) => sum + scorer(value), 0) / values.length
+    if (score > bestScore) {
+      bestIndex = index
+      bestScore = score
+    }
+  }
+  return bestScore >= 0.45 ? bestIndex : -1
+}
+
+function scoreClassValue(value: string) {
+  const text = toText(value)
+  if (/^\d{3}$/.test(text)) return 1
+  if (/^[一二三四五六七八九\d]年?[一二三四五六七八九\d甲乙丙丁戊]+班?$/.test(text)) return 1
+  return 0
+}
+
+function scoreSeatValue(value: string) {
+  const text = toText(value)
+  if (!/^\d{1,2}$/.test(text)) return 0
+  const number = Number(text)
+  return number >= 1 && number <= 40 ? 1 : 0
+}
+
+function scoreNameValue(value: string) {
+  const text = normalizeName(value)
+  if (/^[\u4e00-\u9fff]{2,5}$/.test(text)) return 1
+  return 0
+}
+
+function columnValue(row: string[], index: number) {
+  return index >= 0 ? toText(row[index]) : ''
+}
+
+function cellToText(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  if (typeof value === 'object') {
+    const record = value as { text?: unknown; result?: unknown; richText?: Array<{ text?: unknown }> }
+    if (record.text !== undefined) return toText(record.text)
+    if (record.result !== undefined) return toText(record.result)
+    if (Array.isArray(record.richText)) return record.richText.map((part) => toText(part.text)).join('')
+  }
+  return toText(value)
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ''
+  let quoted = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    const next = text[index + 1]
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        cell += '"'
+        index += 1
+      } else if (char === '"') {
+        quoted = false
+      } else {
+        cell += char
+      }
+    } else if (char === '"') {
+      quoted = true
+    } else if (char === ',') {
+      row.push(cell)
+      cell = ''
+    } else if (char === '\n') {
+      row.push(cell)
+      rows.push(row)
+      row = []
+      cell = ''
+    } else if (char !== '\r') {
+      cell += char
+    }
+  }
+
+  row.push(cell)
+  if (row.some((value) => value !== '') || rows.length === 0) rows.push(row)
+  return rows
 }
 
 function validateRow(row: RosterRowInput, students: Student[]): { status: ValidationStatus } | ValidationIssue {
