@@ -35,6 +35,7 @@ export type ColumnMap = {
   gradeKey?: string
   seatKey?: string
   nameKey?: string
+  classSeatKey?: string  // 班級座號合併欄位，如 60501 = 班級605 + 座號01
 }
 
 export type DatabaseMode = 'demo' | 'local' | 'firebase'

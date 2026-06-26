@@ -33,6 +33,15 @@ function scoreClass(values: string[]) {
   })
 }
 
+// 偵測「班級座號」合併欄位，如 60501 = 班級605 + 座號01
+function scoreCombinedClassSeat(values: string[]) {
+  return ratio(values, (value) => {
+    if (!/^\d{5}$/.test(value)) return false
+    const seat = Number(value.slice(3))
+    return seat >= 1 && seat <= 45
+  })
+}
+
 function scoreName(values: string[]) {
   return ratio(values, (value) => /^[\u4e00-\u9fff]{2,5}$/.test(value.replace(/\s/g, '')))
 }
@@ -51,16 +60,26 @@ export function detectRosterFields(table: CandidateTable): FieldDetection {
       classScore: scoreClass(values),
       seatScore: scoreSeat(values),
       nameScore: scoreName(values),
+      combinedScore: scoreCombinedClassSeat(values),
     }
   })
 
   const bestClass = best(scores, 'classScore')
   const bestSeat = best(scores, 'seatScore')
   const bestName = best(scores, 'nameScore')
+
+  // 偵測「班級座號」合併欄位（關鍵字或內容推測）
+  const bestCombined = scores.slice().sort((a, b) => b.combinedScore - a.combinedScore)[0]
+  const combinedByContent = !headerMap.classSeatKey && (bestCombined?.combinedScore ?? 0) > 0
+    ? bestCombined?.header
+    : undefined
+  const resolvedClassSeatKey = headerMap.classSeatKey ?? combinedByContent
+
   const columnMap: ColumnMap = {
-    classKey: headerMap.classKey ?? bestClass?.header,
+    classSeatKey: resolvedClassSeatKey,
+    classKey: resolvedClassSeatKey ? undefined : (headerMap.classKey ?? bestClass?.header),
     gradeKey: headerMap.gradeKey,
-    seatKey: headerMap.seatKey ?? bestSeat?.header,
+    seatKey: resolvedClassSeatKey ? undefined : (headerMap.seatKey ?? bestSeat?.header),
     nameKey: headerMap.nameKey ?? bestName?.header,
   }
 
@@ -70,13 +89,17 @@ export function detectRosterFields(table: CandidateTable): FieldDetection {
   let confidence = 0
 
   if (columnMap.nameKey) confidence += headerMap.nameKey ? 30 : Math.round((bestName?.nameScore ?? 0) * 25)
-  if (columnMap.seatKey) confidence += headerMap.seatKey ? 30 : Math.round((bestSeat?.seatScore ?? 0) * 25)
-  if (columnMap.classKey) confidence += headerMap.classKey ? 25 : Math.round((bestClass?.classScore ?? 0) * 20)
+  if (columnMap.classSeatKey) {
+    confidence += headerMap.classSeatKey ? 55 : Math.round((bestCombined?.combinedScore ?? 0) * 45)
+  } else {
+    if (columnMap.seatKey) confidence += headerMap.seatKey ? 30 : Math.round((bestSeat?.seatScore ?? 0) * 25)
+    if (columnMap.classKey) confidence += headerMap.classKey ? 25 : Math.round((bestClass?.classScore ?? 0) * 20)
+  }
   if (columnMap.gradeKey) confidence += 10
 
   if (!columnMap.nameKey) warnings.push('找不到姓名欄位')
-  if (!columnMap.seatKey) warnings.push('找不到座號欄位')
-  if (!columnMap.classKey && !columnMap.gradeKey) warnings.push('找不到班級或年級欄位')
+  if (!columnMap.classSeatKey && !columnMap.seatKey) warnings.push('找不到座號欄位')
+  if (!columnMap.classSeatKey && !columnMap.classKey && !columnMap.gradeKey) warnings.push('找不到班級或年級欄位')
   if (confidence < 85 && warnings.length === 0) warnings.push('欄位由內容推測，建議老師確認後再套用結果')
 
   return {

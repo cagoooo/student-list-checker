@@ -9,10 +9,11 @@ export function detectColumns(headers: string[]): ColumnMap {
   const pick = (patterns: RegExp[]) => headers.find((header) => patterns.some((pattern) => pattern.test(header)))
 
   return {
+    classSeatKey: pick([/^班級座號$/, /班.*座號|座號.*班/]),
     classKey: pick([/^班級$/, /班別|班序|班級名稱|class/i]),
     gradeKey: pick([/^年級$/, /就讀年級|grade/i]),
     seatKey: pick([/^座號$/, /座號碼|座次|seat/i]),
-    nameKey: pick([/^學生姓名$/, /^姓名$/, /學生.*姓名|姓名|name/i]),
+    nameKey: pick([/^學生姓名$/, /^姓名$/, /\*?姓名|\*?學生.*姓名|name/i]),
   }
 }
 

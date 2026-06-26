@@ -7,10 +7,40 @@ export function buildImportedRows(data: Record<string, unknown>[], map?: ColumnM
   return data.map((raw, index) => hydrateRow(raw, Number(raw[ROW_NUMBER_KEY]) || index + 2, detected))
 }
 
+// 拆解「班級座號」合併欄位，如 60501 → { classCode: '605', seatNo: '01' }
+function splitClassSeat(value: string): { classCode: string; seatNo: string } | null {
+  const digits = value.replace(/\D/g, '')
+  if (digits.length === 5) {
+    const seat = Number(digits.slice(3))
+    if (seat >= 1 && seat <= 45) {
+      return { classCode: digits.slice(0, 3), seatNo: digits.slice(3) }
+    }
+  }
+  return null
+}
+
 export function hydrateRow(raw: Record<string, unknown>, rowNo: number, map: ColumnMap): ImportedRow {
+  const sourceLabel = toText(raw[SOURCE_LOCATION_KEY]) || undefined
+
+  // 「班級座號」合併欄位優先（如 60501 = 班級605 + 座號01）
+  if (map.classSeatKey) {
+    const combined = toText(raw[map.classSeatKey])
+    const split = splitClassSeat(combined)
+    if (split) {
+      return {
+        id: `${rowNo}-${JSON.stringify(raw)}`,
+        rowNo,
+        sourceLabel,
+        raw,
+        classValue: split.classCode,
+        seatNo: split.seatNo,
+        name: normalizeName(toText(raw[map.nameKey ?? ''])),
+      }
+    }
+  }
+
   const gradeValue = toText(raw[map.gradeKey ?? ''])
   const classValue = toText(raw[map.classKey ?? ''])
-  const sourceLabel = toText(raw[SOURCE_LOCATION_KEY]) || undefined
   return {
     id: `${rowNo}-${JSON.stringify(raw)}`,
     rowNo,
