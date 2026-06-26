@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase-admin/app'
-import { getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import ExcelJS from 'exceljs'
 import mammoth from 'mammoth'
 import { HttpsError, onCall } from 'firebase-functions/https'
@@ -60,6 +60,7 @@ type ValidationIssue = {
 }
 
 type ValidationResponse = {
+  validationId?: string
   summary: {
     total: number
     pass: number
@@ -73,6 +74,22 @@ type ValidationResponse = {
 type FileValidationRequest = {
   fileName: string
   contentBase64: string
+}
+
+type Caller = {
+  uid: string
+  email: string
+}
+
+type ValidationRecordInput = {
+  source: 'rows' | 'file'
+  fileName?: string
+  fileKind?: string
+  rowCount: number
+  parserConfidence?: number
+  parserWarnings?: string[]
+  summary: ValidationResponse['summary']
+  issues: ValidationIssue[]
 }
 
 type FileValidationResponse = ValidationResponse & {
@@ -114,14 +131,21 @@ initializeApp()
 setGlobalOptions({ region: 'asia-east1', maxInstances: 10 })
 
 export const validateRosterRows = onCall<{ rows: RosterRowInput[] }, Promise<ValidationResponse>>(async (request) => {
-  assertSchoolCaller(request.auth?.token.email)
+  const caller = assertSchoolCaller(request.auth?.uid, request.auth?.token.email)
   const rows = assertRows(request.data?.rows)
   const students = await loadStudents()
-  return validateRows(rows, students)
+  const report = validateRows(rows, students)
+  const validationId = await saveValidationRecord(caller, {
+    source: 'rows',
+    rowCount: rows.length,
+    summary: report.summary,
+    issues: report.issues,
+  })
+  return { ...report, validationId }
 })
 
 export const validateRosterFile = onCall<FileValidationRequest, Promise<FileValidationResponse>>(async (request) => {
-  assertSchoolCaller(request.auth?.token.email)
+  const caller = assertSchoolCaller(request.auth?.uid, request.auth?.token.email)
 
   const fileName = toText(request.data?.fileName)
   const contentBase64 = toText(request.data?.contentBase64)
@@ -137,8 +161,19 @@ export const validateRosterFile = onCall<FileValidationRequest, Promise<FileVali
   const rows = assertRows(parsed.rows)
   const students = await loadStudents()
   const report = validateRows(rows, students)
+  const validationId = await saveValidationRecord(caller, {
+    source: 'file',
+    fileName,
+    fileKind: parsed.fileKind,
+    rowCount: rows.length,
+    parserConfidence: parsed.confidence,
+    parserWarnings: parsed.warnings,
+    summary: report.summary,
+    issues: report.issues,
+  })
   return {
     ...report,
+    validationId,
     rows,
     parser: {
       fileKind: parsed.fileKind,
@@ -165,6 +200,39 @@ async function loadStudents(): Promise<Student[]> {
       gender: toText(data.gender),
     }
   })
+}
+
+async function saveValidationRecord(caller: Caller, input: ValidationRecordInput) {
+  const ref = getFirestore().collection('validations').doc()
+  await ref.set({
+    createdAt: FieldValue.serverTimestamp(),
+    createdByUid: caller.uid,
+    createdByEmail: caller.email,
+    source: input.source,
+    fileName: input.fileName ?? null,
+    fileKind: input.fileKind ?? null,
+    rowCount: input.rowCount,
+    parserConfidence: input.parserConfidence ?? null,
+    parserWarnings: input.parserWarnings ?? [],
+    summary: input.summary,
+    issueCount: input.issues.length,
+    issueStatusCounts: input.issues.reduce(
+      (sum, issueItem) => {
+        sum[issueItem.status] += 1
+        return sum
+      },
+      { warning: 0, error: 0 },
+    ),
+    // 只保存定位與分類摘要，不保存完整原始檔或整份學生名單。
+    issuePreview: input.issues.slice(0, 20).map((issueItem) => ({
+      rowNo: issueItem.rowNo,
+      sourceLabel: issueItem.sourceLabel ?? null,
+      status: issueItem.status,
+      issue: issueItem.issue,
+      confidence: issueItem.confidence,
+    })),
+  })
+  return ref.id
 }
 
 function validateRows(rows: RosterRowInput[], students: Student[]): ValidationResponse {
@@ -298,11 +366,13 @@ function rowsToRosterRows(rows: string[][], fileKind: 'xlsx' | 'csv' | 'docx' | 
   }
 }
 
-function assertSchoolCaller(email: unknown) {
+function assertSchoolCaller(uid: unknown, email: unknown): Caller {
+  const uidText = toText(uid)
   const text = toText(email)
-  if (!text || !isSchoolEmail(text)) {
+  if (!uidText || !text || !isSchoolEmail(text)) {
     throw new HttpsError('permission-denied', '請使用石門國小 Google 帳號登入後再校對名單。')
   }
+  return { uid: uidText, email: text }
 }
 
 function assertRows(value: unknown): RosterRowInput[] {

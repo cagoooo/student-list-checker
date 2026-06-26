@@ -51,6 +51,43 @@
 }
 ```
 
+### `validations/{validationId}`
+
+由 Firebase Functions 建立，用於保存每次後端校對的摘要紀錄；不保存原始檔，也不保存完整學生名單。
+
+```ts
+{
+  createdAt: Timestamp
+  createdByUid: string
+  createdByEmail: string
+  source: "file" | "rows"
+  fileName: string | null
+  fileKind: string | null
+  rowCount: number
+  parserConfidence: number | null
+  parserWarnings: string[]
+  summary: {
+    total: number
+    pass: number
+    warning: number
+    error: number
+    usable: boolean
+  }
+  issueCount: number
+  issueStatusCounts: {
+    warning: number
+    error: number
+  }
+  issuePreview: Array<{
+    rowNo: number
+    sourceLabel: string | null
+    status: "warning" | "error"
+    issue: string
+    confidence: number
+  }>
+}
+```
+
 ### `admins/{uid}`
 
 用來判斷誰可以讀寫學生資料。第一位管理員需要手動從 Firebase Console 建立。
@@ -86,6 +123,7 @@ validateRosterFile
 - `validateRosterFile`：接收 `.xlsx` / `.csv` / `.docx` / 文字型 PDF 檔案內容，在後端解析欄位與資料列
 - 在後端完成學生資料比對與中文姓名模糊校正
 - 回傳 `summary` 與 `issues`，讓前端只呈現整份名單是否正確與問題清單
+- 將校對摘要寫入 Firestore `validations`，方便後續追蹤與除錯
 
 本機編譯：
 
@@ -110,6 +148,7 @@ firebase --account=ipad@mail2.smes.tyc.edu.tw deploy --only functions
 - 管理員：可以讀取學生資料
 - 管理員且為 `smes.tyc.edu.tw` 或 `mail2.smes.tyc.edu.tw` 帳號：可以更新學生資料
 - 其他未知 collection：全部拒絕
+- `validations`：老師可讀自己的校對紀錄，admin 可讀全部；寫入只允許 Functions 後端
 
 ## Firebase 專案建立步驟
 

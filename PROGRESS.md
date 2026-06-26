@@ -30,6 +30,7 @@
 | 學生資料庫更新 | 已完成 | 前端可上傳新的學生資料概況 `.xls` 更新本機資料庫 | 目前暫存於瀏覽器 `localStorage` |
 | Firebase SDK | 已完成 | 已加入 Firebase 初始化、Google 登入、Firestore 讀寫服務 | 未設定 env 時會退回匿名示範模式 |
 | Firebase Functions | 已完成第一版 | 新增 `validateRosterRows` / `validateRosterFile` 後端函式，支援後端校對與 `.xlsx` / `.csv` / `.docx` / 文字型 PDF 後端解析 | 尚待部署至正式 Firebase project |
+| 校對紀錄 | 已完成第一版 | 後端校對會寫入 `validations` 摘要紀錄，前端顯示紀錄編號 | 不保存原始檔或完整名單 |
 | Firestore 資料模型 | 已完成 | 已定義 `students`、`studentDatabaseMeta`、`admins` | 詳見 `FIREBASE_SETUP.md` |
 | Firestore 安全規則 | 已完成 | 預設拒絕；僅 `admins/{uid}` 可讀寫學生資料 | 需部署到 Firebase project |
 | GitHub Secrets 串接 | 已完成 | GitHub Actions 已可接收 `VITE_FIREBASE_*` secrets | 尚待填入正式 Firebase Web App config |
@@ -52,7 +53,7 @@
 | .doc / OCR 辨識品質 | 需留意 | `.doc` 為 best-effort 文字還原、OCR 需下載語言資料且對低品質掃描準確度有限，建議優先轉成 Excel / CSV |
 | 正式登入權限 | 尚未實作 | 目前是單機前端工具，尚無教師 / 行政角色登入 |
 | 正式後端資料庫 | 部分完成 | 已加入 Firebase / Firestore / Functions 架構，尚待建立 Firebase project、secrets 與部署 |
-| 操作紀錄 | 尚未實作 | 尚未保存誰上傳、誰修正、何時下載 |
+| 操作紀錄 | 部分完成 | 後端校對已保存上傳者、檔名、摘要、問題數與問題預覽 | 下載紀錄與任務流程尚未實作 |
 | 產品主線 | 已重新對齊 | 正式版應以「後端辨識與比對、前端回報是否正確」為主，不以修正版下載為核心；前端第一版回報頁已落地 |
 | Excel 解析安全性 | 需改善 | 目前使用 `xlsx`，`npm audit` 顯示套件有 high severity 且暫無官方修補版 |
 | 大量名單效能 | 未壓測 | 第一版足以處理一般班級 / 活動名單，尚未針對全校大量檔案做效能測試 |

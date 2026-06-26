@@ -91,6 +91,7 @@ function App() {
     [backendReport, issueResults],
   )
   const totalCount = backendReport?.summary.total ?? results.length
+  const validationId = backendReport?.validationId
   const reportTone = stats.error > 0 ? 'danger' : stats.warning > 0 ? 'warning' : 'success'
   // Firebase 已設定時，必須具備 admin 權限才能更新資料庫；未設定 Firebase 才保留本機模式。
   const canUpdateDatabase = !firebaseReady || isAdmin
@@ -392,6 +393,7 @@ function App() {
           <p>{message}</p>
           <p className="source-note">
             資料庫來源：{databaseModeLabel(databaseMode)}，目前載入 {students.length} 位學生；校對模式：{backendModeLabel(backendStatus)}
+            {validationId ? `；紀錄編號：${validationId}` : ''}
           </p>
         </div>
         <div className="metric-grid" aria-label="校對統計">

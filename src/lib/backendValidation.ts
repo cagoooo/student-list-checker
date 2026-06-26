@@ -26,6 +26,7 @@ export type BackendValidationIssue = {
 }
 
 export type BackendValidationReport = {
+  validationId?: string
   summary: {
     total: number
     pass: number

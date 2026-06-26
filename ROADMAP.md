@@ -58,6 +58,7 @@ GET  /api/validations/:id
 - 後端讀取 Firestore `students` 後比對班級、座號、姓名 ✅
 - 回傳 `summary` / `issues` 給前端結果回報頁 ✅
 - 前端在 Firebase 登入後優先呼叫後端檔案解析 / 校對，失敗時自動回退本機校對 ✅
+- 後端寫入 `validations` 摘要紀錄，前端顯示紀錄編號 ✅
 
 核心回傳資料應包含：
 
