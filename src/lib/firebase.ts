@@ -4,6 +4,7 @@ import {
   getAuth,
   getRedirectResult,
   onAuthStateChanged,
+  signInWithPopup,
   signInWithRedirect,
   signOut,
   type User,
@@ -71,24 +72,34 @@ export function subscribeCurrentUser(callback: (user: User | null) => void) {
   return onAuthStateChanged(getAuth(currentRuntime.app), callback)
 }
 
-export async function signInWithGoogle() {
-  const currentRuntime = getFirebaseRuntime()
-  if (!currentRuntime) {
-    throw new Error('Firebase is not configured')
-  }
-
+function makeGoogleProvider() {
   const provider = new GoogleAuthProvider()
   provider.setCustomParameters({ hd: 'mail2.smes.tyc.edu.tw', prompt: 'select_account' })
-  return signInWithRedirect(getAuth(currentRuntime.app), provider)
+  return provider
 }
 
-export async function getGoogleRedirectResult() {
+export async function signInWithGoogle() {
+  const currentRuntime = getFirebaseRuntime()
+  if (!currentRuntime) throw new Error('Firebase is not configured')
+  return signInWithPopup(getAuth(currentRuntime.app), makeGoogleProvider())
+}
+
+export async function signInWithGoogleRedirect() {
+  const currentRuntime = getFirebaseRuntime()
+  if (!currentRuntime) throw new Error('Firebase is not configured')
+  return signInWithRedirect(getAuth(currentRuntime.app), makeGoogleProvider())
+}
+
+export async function getGoogleRedirectResult(): Promise<{ errorMessage: string } | null> {
   const currentRuntime = getFirebaseRuntime()
   if (!currentRuntime) return null
   try {
-    return await getRedirectResult(getAuth(currentRuntime.app))
-  } catch {
+    await getRedirectResult(getAuth(currentRuntime.app))
     return null
+  } catch (error) {
+    const msg = (error as { message?: string }).message ?? String(error)
+    console.error('[Auth] getRedirectResult error:', msg)
+    return { errorMessage: msg }
   }
 }
 

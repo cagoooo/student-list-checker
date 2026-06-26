@@ -24,7 +24,6 @@ import {
 } from './lib/backendValidation'
 import {
   checkIsAdmin,
-  getGoogleRedirectResult,
   isFirebaseEnabled,
   loadFirebaseStudents,
   saveFirebaseStudents,
@@ -168,10 +167,11 @@ function App() {
     const params = new URLSearchParams(window.location.search)
     if (params.get('login') === '1') {
       history.replaceState(null, '', window.location.pathname)
-      void signInWithGoogle()
-      return
+      signInWithGoogle().catch((err: unknown) => {
+        const msg = (err as { message?: string }).message ?? String(err)
+        setMessage(`Google 登入失敗：${msg}`)
+      })
     }
-    void getGoogleRedirectResult()
   }, [firebaseReady])
 
   useEffect(() => {
