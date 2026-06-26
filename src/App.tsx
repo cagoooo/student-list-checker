@@ -31,6 +31,7 @@ import {
 } from './lib/importer/importRoster'
 import { buildCorrectedWordBlob } from './lib/importer/exportWord'
 import { recallColumnMap, rememberColumnMap } from './lib/importer/columnMemory'
+import { compareChineseNames, findBestNameMatch } from './lib/importer/nameMatch'
 import {
   applyStudentToRaw,
   buildImportedRows,
@@ -784,13 +785,13 @@ function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
     (student) => normalizeClass(student.className) === classCode && student.seatNo === row.seatNo,
   )
   if (sameSeat) {
-    const distance = levenshtein(normalizeName(sameSeat.name), row.name)
+    const nameMatch = compareChineseNames(sameSeat.name, row.name)
     return {
       ...row,
-      status: distance <= 2 ? 'warning' : 'error',
-      issue: `班級與座號吻合，但姓名應為「${sameSeat.name}」。`,
+      status: nameMatch.level === 'low' ? 'error' : 'warning',
+      issue: `班級與座號吻合，但姓名應為「${sameSeat.name}」（${nameMatchLabel(nameMatch.level)}：${nameMatch.reasons.join('、') || '姓名差異'}）。`,
       suggestion: sameSeat,
-      confidence: Math.max(55, 95 - distance * 15),
+      confidence: nameMatch.confidence,
     }
   }
 
@@ -805,20 +806,15 @@ function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
     }
   }
 
-  const fuzzy = students
-    .map((student) => ({
-      student,
-      distance: levenshtein(normalizeName(student.name), row.name),
-    }))
-    .sort((a, b) => a.distance - b.distance)[0]
+  const fuzzy = findBestNameMatch(row.name, students)
 
-  if (fuzzy && fuzzy.distance <= 2) {
+  if (fuzzy && fuzzy.level !== 'low') {
     return {
       ...row,
       status: 'warning',
-      issue: `找不到完全相符資料，疑似姓名為「${fuzzy.student.name}」。`,
+      issue: `找不到完全相符資料，疑似姓名為「${fuzzy.student.name}」（${nameMatchLabel(fuzzy.level)}：${fuzzy.reasons.join('、') || '姓名近似'}）。`,
       suggestion: fuzzy.student,
-      confidence: 64,
+      confidence: fuzzy.confidence,
     }
   }
 
@@ -844,23 +840,12 @@ function summarize(results: ValidationResult[]) {
   )
 }
 
-function levenshtein(a: string, b: string) {
-  const matrix = Array.from({ length: a.length + 1 }, (_, row) =>
-    Array.from({ length: b.length + 1 }, (_, column) => (row === 0 ? column : column === 0 ? row : 0)),
-  )
-
-  for (let row = 1; row <= a.length; row += 1) {
-    for (let column = 1; column <= b.length; column += 1) {
-      const cost = a[row - 1] === b[column - 1] ? 0 : 1
-      matrix[row][column] = Math.min(
-        matrix[row - 1][column] + 1,
-        matrix[row][column - 1] + 1,
-        matrix[row - 1][column - 1] + cost,
-      )
-    }
-  }
-
-  return matrix[a.length][b.length]
+function nameMatchLabel(level: 'high' | 'medium' | 'low') {
+  return {
+    high: '高信心建議',
+    medium: '中信心待確認',
+    low: '低信心人工確認',
+  }[level]
 }
 
 function statusLabel(status: ValidationStatus) {
