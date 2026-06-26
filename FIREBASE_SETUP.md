@@ -83,7 +83,7 @@ validateRosterFile
 - 驗證呼叫者必須是石門國小學校帳號
 - 從 Firestore `students` collection 讀取正式學生資料庫
 - `validateRosterRows`：接收前端已辨識出的列資料（班級、座號、姓名、來源列號）
-- `validateRosterFile`：接收 `.xlsx` / `.csv` / `.docx` 檔案內容，在後端解析欄位與資料列
+- `validateRosterFile`：接收 `.xlsx` / `.csv` / `.docx` / 文字型 PDF 檔案內容，在後端解析欄位與資料列
 - 在後端完成學生資料比對與中文姓名模糊校正
 - 回傳 `summary` 與 `issues`，讓前端只呈現整份名單是否正確與問題清單
 

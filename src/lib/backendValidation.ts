@@ -39,7 +39,7 @@ export type BackendValidationReport = {
 export type BackendFileValidationReport = BackendValidationReport & {
   rows: BackendRosterRow[]
   parser: {
-    fileKind: 'xlsx' | 'csv' | 'docx'
+    fileKind: 'xlsx' | 'csv' | 'docx' | 'pdf'
     rowCount: number
     confidence: number
     warnings: string[]

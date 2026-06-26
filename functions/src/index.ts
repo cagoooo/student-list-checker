@@ -26,6 +26,19 @@ type RosterRowInput = {
   name?: string
 }
 
+type PdfTextItem = {
+  str: string
+  transform: number[]
+  width?: number
+}
+
+type PositionedPdfItem = {
+  text: string
+  x: number
+  y: number
+  width: number
+}
+
 type ValidationStatus = 'pass' | 'warning' | 'error'
 
 type ValidationIssue = {
@@ -65,7 +78,7 @@ type FileValidationRequest = {
 type FileValidationResponse = ValidationResponse & {
   rows: RosterRowInput[]
   parser: {
-    fileKind: 'xlsx' | 'csv' | 'docx'
+    fileKind: 'xlsx' | 'csv' | 'docx' | 'pdf'
     rowCount: number
     confidence: number
     warnings: string[]
@@ -206,8 +219,12 @@ async function parseRosterFile(fileName: string, buffer: Buffer) {
     const textRows = await docxTextRows(buffer)
     return rowsToRosterRows(textRows, 'docx' as const)
   }
+  if (/\.pdf$/i.test(fileName)) {
+    const rows = await pdfTextRows(buffer)
+    return rowsToRosterRows(rows, 'pdf' as const)
+  }
 
-  throw new HttpsError('invalid-argument', '後端目前先支援 .xlsx、.csv 與 .docx，其他格式會由前端既有管線處理。')
+  throw new HttpsError('invalid-argument', '後端目前先支援 .xlsx、.csv、.docx 與文字型 PDF，其他格式會由前端既有管線處理。')
 }
 
 async function docxTableRows(buffer: Buffer) {
@@ -224,7 +241,25 @@ async function docxTextRows(buffer: Buffer) {
     .map(splitTextLine)
 }
 
-function rowsToRosterRows(rows: string[][], fileKind: 'xlsx' | 'csv' | 'docx') {
+async function pdfTextRows(buffer: Buffer) {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const pdf = await pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    useSystemFonts: true,
+  }).promise
+  const rows: string[][] = []
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber)
+    const content = await page.getTextContent()
+    const items = content.items.flatMap((item) => isPdfTextItem(item) ? [item] : [])
+    rows.push(...pdfItemsToRows(items))
+  }
+
+  return rows
+}
+
+function rowsToRosterRows(rows: string[][], fileKind: 'xlsx' | 'csv' | 'docx' | 'pdf') {
   const nonEmptyRows = rows.filter((row) => row.some((cell) => toText(cell)))
   if (nonEmptyRows.length < 1) {
     throw new HttpsError('invalid-argument', '檔案中沒有可校對的名單資料。')
@@ -407,6 +442,58 @@ function splitTextLine(line: string) {
 
   const match = line.match(/^([一二三四五六七八九\d]{1,3}(?:年?[一二三四五六七八九\d甲乙丙丁戊]+班?)?)\s*([0-9]{1,2})\s*([\u4e00-\u9fff]{2,5})/)
   return match ? [match[1], match[2], match[3]] : [line]
+}
+
+function pdfItemsToRows(items: PdfTextItem[]) {
+  const positioned: PositionedPdfItem[] = items
+    .map((item) => ({
+      text: item.str.trim(),
+      x: item.transform[4] ?? 0,
+      y: item.transform[5] ?? 0,
+      width: item.width ?? 0,
+    }))
+    .filter((item) => item.text !== '')
+
+  const lines: Array<{ y: number; items: PositionedPdfItem[] }> = []
+  positioned
+    .sort((a, b) => b.y - a.y || a.x - b.x)
+    .forEach((item) => {
+      const line = lines.find((current) => Math.abs(current.y - item.y) <= 4)
+      if (line) {
+        line.items.push(item)
+        return
+      }
+      lines.push({ y: item.y, items: [item] })
+    })
+
+  return lines.map((line) => splitTextLine(joinPdfLineItems(line.items))).filter((row) => row.some(Boolean))
+}
+
+function joinPdfLineItems(items: PositionedPdfItem[]) {
+  const sorted = items.sort((a, b) => a.x - b.x)
+  const totalWidth = sorted.reduce((sum, item) => sum + item.width, 0)
+  const totalChars = sorted.reduce((sum, item) => sum + Math.max(item.text.length, 1), 0)
+  const avgCharWidth = totalChars > 0 ? totalWidth / totalChars : 0
+
+  return sorted.reduce((text, item, index) => {
+    if (index === 0) return item.text
+    const prev = sorted[index - 1]
+    const gap = item.x - (prev.x + prev.width)
+    const columnGap = avgCharWidth > 0 ? avgCharWidth * 1.5 : 6
+    const separator = gap > columnGap ? '\t' : ' '
+    return text + separator + item.text
+  }, '')
+}
+
+function isPdfTextItem(item: unknown): item is PdfTextItem {
+  return (
+    typeof item === 'object' &&
+    item !== null &&
+    'str' in item &&
+    'transform' in item &&
+    typeof item.str === 'string' &&
+    Array.isArray(item.transform)
+  )
 }
 
 function stripTags(value: string) {
