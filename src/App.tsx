@@ -175,6 +175,21 @@ function App() {
   }, [firebaseReady])
 
   useEffect(() => {
+    if (!firebaseReady) return
+    const hasLocal = Boolean(loadStoredStudents())
+    if (hasLocal) return
+    loadFirebaseStudents()
+      .then((firebaseStudents) => {
+        if (firebaseStudents.length > 0) {
+          setStudents(firebaseStudents)
+          setDatabaseMode('firebase')
+          localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(firebaseStudents))
+        }
+      })
+      .catch(() => {})
+  }, [firebaseReady])
+
+  useEffect(() => {
     if (!firebaseReady) return undefined
 
     return subscribeCurrentUser(async (user) => {
@@ -191,7 +206,7 @@ function App() {
         if (firebaseStudents.length > 0) {
           setStudents(firebaseStudents)
           setDatabaseMode('firebase')
-          setMessage(`已從 Firebase 載入 ${firebaseStudents.length} 位學生資料。`)
+          localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(firebaseStudents))
         } else {
           setMessage('已登入 Firebase，但雲端學生資料庫尚未建立，可先上傳學務系統匯出檔。')
         }
@@ -328,7 +343,7 @@ function App() {
       setStudents(nextStudents)
       if (firebaseReady && userEmail) {
         await saveFirebaseStudents(nextStudents, file.name)
-        localStorage.removeItem(STUDENT_STORAGE_KEY)
+        localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(nextStudents))
         setDatabaseMode('firebase')
         setMessage(`已更新 Firebase 學生資料庫：${file.name}，共 ${nextStudents.length} 位學生。`)
       } else {

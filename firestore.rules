@@ -23,14 +23,14 @@ service cloud.firestore {
     }
 
     match /students/{studentId} {
-      // 讀取：全校 @mail2 帳號（一般老師可校對自己班的名單）
-      allow read: if isSchoolAccount();
+      // 讀取：公開（讓訪客免登入也能校對名單）
+      allow read: if true;
       // 寫入：僅限 admins（資訊組長）更新學生資料庫
       allow write: if isAdmin() && isSchoolAccount();
     }
 
     match /studentDatabaseMeta/{docId} {
-      allow read: if isSchoolAccount();
+      allow read: if true;
       allow write: if isAdmin() && isSchoolAccount();
     }
 
