@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { buildFrameFromRows, detectColumns, findHeaderRow, normalizeHeaders, resolveHeader } from '../excel'
+import * as XLSX from 'xlsx'
+import { buildDetectionResultFromTables } from '../importRoster'
+import { buildFrameFromRows, detectColumns, findHeaderRow, normalizeHeaders, parseExcelTables, resolveHeader } from '../excel'
 
 describe('excel roster detection', () => {
   const rows = [
@@ -79,5 +81,48 @@ describe('manual header row override', () => {
     expect(frame.headerRow).toBe(0)
     expect(frame.headers[0]).toBe('欄位1')
     expect(frame.rowCount).toBe(4)
+  })
+})
+
+describe('class-coded sheets', () => {
+  it('combines class sheets and fills class value from the sheet name', () => {
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([
+        ['座號', '顯示名稱(最多16個字元)', 'Email', '組別'],
+        ['1', '石爵綸', '1100150@mail2.smes.tyc.edu.tw', '1'],
+        ['2', '孫禾華', '1100159@mail2.smes.tyc.edu.tw', '2'],
+      ]),
+      '501',
+    )
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([
+        ['座號', '顯示名稱(最多16個字元)', 'Email', '組別'],
+        ['1', '林宗葳', '1100164@mail2.smes.tyc.edu.tw', '1'],
+        ['2', '林宗誼', '1100165@mail2.smes.tyc.edu.tw', '2'],
+      ]),
+      '502',
+    )
+
+    const buffer = XLSX.write(workbook, { type: 'array', bookType: 'xls' }) as ArrayBuffer
+    const tables = parseExcelTables(buffer, '五年級各班名單.xls')
+    const result = buildDetectionResultFromTables('五年級各班名單.xls', 'excel', tables)
+
+    expect(result.selectedTable?.id).toBe('combined-class-sheets-2')
+    expect(result.importedRows).toHaveLength(4)
+    expect(result.importedRows[0]).toMatchObject({
+      classValue: '501',
+      seatNo: '01',
+      name: '石爵綸',
+      sourceLabel: '501',
+    })
+    expect(result.importedRows[2]).toMatchObject({
+      classValue: '502',
+      seatNo: '01',
+      name: '林宗葳',
+      sourceLabel: '502',
+    })
   })
 })

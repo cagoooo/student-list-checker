@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx'
 import type { ColumnMap } from '../../types'
 import type { CandidateTable } from './types'
-import { ROW_NUMBER_KEY, normalizeHeaders, toText } from './normalize'
+import { ROW_NUMBER_KEY, SOURCE_LOCATION_KEY, normalizeHeaders, toText } from './normalize'
 
 export { normalizeHeaders }
 
@@ -115,9 +115,16 @@ export function toRecord(row: unknown[], headers: string[], rowNo: number): Reco
   return record
 }
 
+const SHEET_CLASS_KEY = '班級'
+
+function sheetNameClassCode(sheetName: string) {
+  const compact = sheetName.replace(/\s/g, '')
+  return /^\d{3}$/.test(compact) ? compact : ''
+}
+
 export function parseExcelTables(buffer: ArrayBuffer, sourceName: string): CandidateTable[] {
   const workbook = XLSX.read(buffer, { type: 'array' })
-  return workbook.SheetNames.map((sheetName) => {
+  const tables = workbook.SheetNames.map((sheetName) => {
     const sheet = workbook.Sheets[sheetName]
     const sheetRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
       header: 1,
@@ -127,12 +134,19 @@ export function parseExcelTables(buffer: ArrayBuffer, sourceName: string): Candi
     const { headers, headerless, headerIndex } = resolveHeader(sheetRows)
     const dataStart = headerless ? 0 : headerIndex + 1
     const headerRow = headerless ? 0 : headerIndex + 1
+    const classCode = sheetNameClassCode(sheetName)
+    const resolvedHeaders = classCode && !headers.includes(SHEET_CLASS_KEY) ? [...headers, SHEET_CLASS_KEY] : headers
     const rows = sheetRows
       .slice(dataStart)
-      .map((row, index) => toRecord(row, headers, dataStart + index + 1))
+      .map((row, index) => {
+        const record = toRecord(row, headers, dataStart + index + 1)
+        record[SOURCE_LOCATION_KEY] = sheetName
+        if (classCode) record[SHEET_CLASS_KEY] = classCode
+        return record
+      })
       .filter((row) =>
         Object.entries(row)
-          .filter(([key]) => !key.startsWith('__'))
+          .filter(([key]) => !key.startsWith('__') && key !== SHEET_CLASS_KEY)
           .some(([, value]) => toText(value) !== ''),
       )
 
@@ -141,10 +155,34 @@ export function parseExcelTables(buffer: ArrayBuffer, sourceName: string): Candi
       sourceName,
       sheetName,
       headerRow,
-      headers,
+      headers: resolvedHeaders,
       rows,
       rowCount: rows.length,
       rawRows: sheetRows.map((row) => row.map((cell) => toText(cell))),
     }
   })
+
+  return addCombinedClassSheetTable(tables, sourceName)
+}
+
+function addCombinedClassSheetTable(tables: CandidateTable[], sourceName: string) {
+  const classSheetTables = tables.filter((table) => table.sheetName && sheetNameClassCode(table.sheetName))
+  if (classSheetTables.length < 2) return tables
+
+  const firstHeaders = classSheetTables[0].headers
+  const sameHeaders = classSheetTables.every((table) => table.headers.join('\u0000') === firstHeaders.join('\u0000'))
+  if (!sameHeaders) return tables
+
+  const combinedRows = classSheetTables.flatMap((table) => table.rows)
+  const combinedTable: CandidateTable = {
+    id: `combined-class-sheets-${classSheetTables.length}`,
+    sourceName,
+    sheetName: classSheetTables.map((table) => table.sheetName).join('、'),
+    headerRow: classSheetTables[0].headerRow,
+    headers: firstHeaders,
+    rows: combinedRows,
+    rowCount: combinedRows.length,
+  }
+
+  return [combinedTable, ...tables]
 }
