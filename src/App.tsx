@@ -404,7 +404,7 @@ function App() {
       ) : null}
 
       <header className="topbar">
-        <div>
+        <div className="topbar-brand">
           <p className="eyebrow">桃園市龍潭區石門國民小學</p>
           <h1>學生名單校對平台</h1>
           <p className={`database-chip database-${databaseMode}`}>
