@@ -133,7 +133,7 @@ function App() {
         : stats.warning > 0
           ? 'warning'
           : 'success'
-  const canUpdateDatabase = !firebaseReady || isAdmin
+  const canUpdateDatabase = isAdmin
 
   useEffect(() => {
     if (!isOcrJobPending) {
@@ -372,15 +372,6 @@ function App() {
               <input type="file" accept=".xls,.xlsx" onChange={handleDatabaseFile} />
             </label>
           ) : null}
-          <label className="primary-button">
-            <Upload size={18} />
-            上傳名單
-            <input
-              type="file"
-              accept={ACCEPTED_FORMATS}
-              onChange={handleFile}
-            />
-          </label>
         </div>
       </header>
 
