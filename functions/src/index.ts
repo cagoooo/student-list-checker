@@ -1,9 +1,11 @@
 import { initializeApp } from 'firebase-admin/app'
 import { FieldValue, getFirestore } from 'firebase-admin/firestore'
+import { getStorage } from 'firebase-admin/storage'
 import ExcelJS from 'exceljs'
 import mammoth from 'mammoth'
 import { HttpsError, onCall } from 'firebase-functions/https'
 import { setGlobalOptions } from 'firebase-functions/options'
+import { onObjectFinalized } from 'firebase-functions/storage'
 
 type Student = {
   id: string
@@ -93,7 +95,7 @@ type Caller = {
 }
 
 type ValidationRecordInput = {
-  source: 'rows' | 'file'
+  source: 'rows' | 'file' | 'ocr'
   fileName?: string
   fileKind?: string
   rowCount: number
@@ -212,6 +214,8 @@ export const createOcrJob = onCall<OcrJobRequest, Promise<OcrJobResponse>>(async
   const now = Date.now()
   const expiresAt = new Date(now + 24 * 60 * 60 * 1000)
   const ref = getFirestore().collection('ocrJobs').doc()
+  const storagePath = `ocr-jobs/${caller.uid}/${ref.id}/source.pdf`
+  const storageBucket = getStorage().bucket().name
   await ref.set({
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
@@ -219,14 +223,31 @@ export const createOcrJob = onCall<OcrJobRequest, Promise<OcrJobResponse>>(async
     createdByUid: caller.uid,
     createdByEmail: caller.email,
     fileName,
+    storageBucket,
+    storagePath,
     fileSizeBase64: contentBase64.length,
     status: 'queued',
     progress: 0,
     message: 'OCR 背景辨識工作已建立，等待 worker 接手處理。',
     resultValidationId: null,
     errorMessage: null,
-    // 目前先不保存原始檔；正式 OCR worker 需改接短期保存的 Storage 物件或外部文件 AI。
     inputStored: false,
+  })
+
+  const buffer = Buffer.from(contentBase64, 'base64')
+  await getStorage().bucket().file(storagePath).save(buffer, {
+    contentType: 'application/pdf',
+    resumable: false,
+    metadata: {
+      metadata: {
+        jobId: ref.id,
+        createdByUid: caller.uid,
+      },
+    },
+  })
+  await ref.update({
+    updatedAt: FieldValue.serverTimestamp(),
+    inputStored: true,
   })
 
   return {
@@ -235,6 +256,100 @@ export const createOcrJob = onCall<OcrJobRequest, Promise<OcrJobResponse>>(async
     message: 'OCR 背景辨識工作已建立，稍後可用紀錄編號追蹤狀態。',
   }
 })
+
+export const processOcrJob = onObjectFinalized(
+  {
+    region: 'asia-east1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+  },
+  async (event) => {
+    const object = event.data
+    const storagePath = toText(object.name)
+    if (!storagePath.startsWith('ocr-jobs/') || !storagePath.endsWith('/source.pdf')) return
+
+    const jobId = toText(object.metadata?.jobId) || storagePath.split('/')[2]
+    if (!jobId) return
+
+    const firestore = getFirestore()
+    const jobRef = firestore.collection('ocrJobs').doc(jobId)
+    const jobSnapshot = await jobRef.get()
+    if (!jobSnapshot.exists) return
+
+    const job = jobSnapshot.data() ?? {}
+    if (toText(job.status) !== 'queued') return
+
+    const caller: Caller = {
+      uid: toText(job.createdByUid),
+      email: toText(job.createdByEmail),
+    }
+    const fileName = toText(job.fileName) || '掃描名單.pdf'
+    const bucketName = toText(object.bucket)
+    const file = getStorage().bucket(bucketName).file(storagePath)
+
+    try {
+      await jobRef.update({
+        updatedAt: FieldValue.serverTimestamp(),
+        status: 'processing',
+        progress: 10,
+        message: 'OCR worker 已開始處理檔案。',
+        errorMessage: null,
+      })
+
+      const [buffer] = await file.download()
+      await jobRef.update({
+        updatedAt: FieldValue.serverTimestamp(),
+        progress: 35,
+        message: 'OCR worker 已讀取暫存 PDF，正在辨識名單資料。',
+      })
+
+      const parsed = await parseOcrPdf(buffer)
+      const rows = assertRows(parsed.rows)
+      await jobRef.update({
+        updatedAt: FieldValue.serverTimestamp(),
+        progress: 70,
+        message: 'OCR worker 已取得名單列資料，正在進行學生資料庫校對。',
+      })
+
+      const students = await loadStudents()
+      const report = validateRows(rows, students)
+      const validationId = await saveValidationRecord(caller, {
+        source: 'ocr',
+        fileName,
+        fileKind: parsed.fileKind,
+        rowCount: rows.length,
+        parserConfidence: parsed.confidence,
+        parserWarnings: parsed.warnings,
+        summary: report.summary,
+        issues: report.issues,
+      })
+
+      await file.delete({ ignoreNotFound: true })
+      await jobRef.update({
+        updatedAt: FieldValue.serverTimestamp(),
+        completedAt: FieldValue.serverTimestamp(),
+        inputDeletedAt: FieldValue.serverTimestamp(),
+        status: 'completed',
+        progress: 100,
+        message: 'OCR 背景辨識與校對已完成。',
+        resultValidationId: validationId,
+        resultSummary: report.summary,
+        resultIssueCount: report.issues.length,
+        errorMessage: null,
+      })
+    } catch (error) {
+      await file.delete({ ignoreNotFound: true }).catch(() => undefined)
+      await jobRef.update({
+        updatedAt: FieldValue.serverTimestamp(),
+        inputDeletedAt: FieldValue.serverTimestamp(),
+        status: 'failed',
+        progress: 100,
+        message: 'OCR 背景辨識失敗。',
+        errorMessage: errorToMessage(error),
+      })
+    }
+  },
+)
 
 async function loadStudents(): Promise<Student[]> {
   const snapshot = await getFirestore().collection('students').get()
@@ -345,6 +460,15 @@ async function parseRosterFile(fileName: string, buffer: Buffer) {
   }
 
   throw new HttpsError('invalid-argument', '後端目前先支援 .xlsx、.csv、.docx 與文字型 PDF，其他格式會由前端既有管線處理。')
+}
+
+async function parseOcrPdf(buffer: Buffer) {
+  const rows = await pdfTextRows(buffer)
+  if (rows.length === 0) {
+    throw new Error('OCR worker 管線已建立，但目前尚未接入影像 OCR 引擎；這份 PDF 沒有可抽取的文字。')
+  }
+
+  return rowsToRosterRows(rows, 'pdf' as const)
 }
 
 async function docxTableRows(buffer: Buffer) {
@@ -761,6 +885,12 @@ function isSchoolEmail(email: string) {
 
 function toText(value: unknown) {
   return value === null || value === undefined ? '' : String(value).trim()
+}
+
+function errorToMessage(error: unknown) {
+  if (error instanceof HttpsError) return error.message
+  if (error instanceof Error) return error.message
+  return 'OCR 背景辨識發生未知錯誤。'
 }
 
 function toDigit(value: string) {

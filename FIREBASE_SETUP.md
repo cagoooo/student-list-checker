@@ -60,7 +60,7 @@
   createdAt: Timestamp
   createdByUid: string
   createdByEmail: string
-  source: "file" | "rows"
+  source: "file" | "rows" | "ocr"
   fileName: string | null
   fileKind: string | null
   rowCount: number
@@ -100,6 +100,27 @@
 }
 ```
 
+### `ocrJobs/{jobId}`
+
+由 Firebase Functions 建立，用來追蹤掃描 PDF 的背景辨識工作。原始 PDF 不存進 Firestore，只記錄短期 Storage path 與校對結果摘要。
+
+```ts
+{
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  expiresAt: Timestamp
+  createdByUid: string
+  createdByEmail: string
+  fileName: string
+  storageBucket: string
+  storagePath: string
+  status: "queued" | "processing" | "completed" | "failed"
+  progress: number
+  resultValidationId: string | null
+  errorMessage: string | null
+}
+```
+
 ## Firebase Functions
 
 後端程式位於：
@@ -114,6 +135,7 @@ functions/src/index.ts
 validateRosterRows
 validateRosterFile
 createOcrJob
+processOcrJob
 ```
 
 職責：
@@ -122,7 +144,8 @@ createOcrJob
 - 從 Firestore `students` collection 讀取正式學生資料庫
 - `validateRosterRows`：接收前端已辨識出的列資料（班級、座號、姓名、來源列號）
 - `validateRosterFile`：接收 `.xlsx` / `.csv` / `.docx` / 文字型 PDF 檔案內容，在後端解析欄位與資料列
-- `createOcrJob`：建立掃描 PDF 的背景 OCR 工作紀錄（worker 尚待接入）
+- `createOcrJob`：建立掃描 PDF 的背景 OCR 工作紀錄，並將原始 PDF 暫存到短期 Storage path
+- `processOcrJob`：由 Storage finalized event 觸發，讀取 PDF、更新 job 狀態、完成辨識後走同一套後端校對流程
 - 在後端完成學生資料比對與中文姓名模糊校正
 - 回傳 `summary` 與 `issues`，讓前端只呈現整份名單是否正確與問題清單
 - 將校對摘要寫入 Firestore `validations`，方便後續追蹤與除錯
@@ -141,6 +164,12 @@ npm run build
 firebase --account=ipad@mail2.smes.tyc.edu.tw deploy --only functions
 ```
 
+若同時部署安全規則：
+
+```bash
+firebase --account=ipad@mail2.smes.tyc.edu.tw deploy --only firestore:rules,storage
+```
+
 ## 安全規則摘要
 
 目前規則採保守設計：
@@ -152,6 +181,7 @@ firebase --account=ipad@mail2.smes.tyc.edu.tw deploy --only functions
 - 其他未知 collection：全部拒絕
 - `validations`：老師可讀自己的校對紀錄，admin 可讀全部；寫入只允許 Functions 後端
 - `ocrJobs`：老師可讀自己的 OCR 工作，admin 可讀全部；寫入只允許 Functions 後端
+- `storage.rules`：預設拒絕前端讀寫；OCR 暫存 PDF 只由 Functions Admin SDK 建立、讀取與刪除
 
 ## Firebase 專案建立步驟
 
