@@ -165,6 +165,12 @@ function App() {
 
   useEffect(() => {
     if (!firebaseReady) return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('login') === '1') {
+      history.replaceState(null, '', window.location.pathname)
+      void signInWithGoogle()
+      return
+    }
     void getGoogleRedirectResult()
   }, [firebaseReady])
 
@@ -337,7 +343,13 @@ function App() {
     }
   }
 
+  const isInIframe = window !== window.top
+
   async function handleSignIn() {
+    if (isInIframe) {
+      window.open(window.location.href + '?login=1', '_blank', 'noopener')
+      return
+    }
     try {
       await signInWithGoogle()
     } catch {
@@ -558,10 +570,14 @@ function App() {
               </>
             ) : (
               <>
-                <p className="admin-panel__note">以管理員 Google 帳號登入，解鎖資料庫更新功能。</p>
+                <p className="admin-panel__note">
+                  {isInIframe
+                    ? '請在獨立視窗登入（點下方按鈕會開啟新分頁）。'
+                    : '以管理員 Google 帳號登入，解鎖資料庫更新功能。'}
+                </p>
                 <button type="button" className="admin-panel__btn admin-panel__btn--primary" onClick={() => { void handleSignIn(); setShowAdminPanel(false) }}>
                   <LogIn size={15} />
-                  Google 登入
+                  {isInIframe ? '開啟新分頁登入' : 'Google 登入'}
                 </button>
               </>
             )}
