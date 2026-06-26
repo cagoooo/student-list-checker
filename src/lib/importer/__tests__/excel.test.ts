@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectColumns, findHeaderRow, normalizeHeaders, resolveHeader } from '../excel'
+import { buildFrameFromRows, detectColumns, findHeaderRow, normalizeHeaders, resolveHeader } from '../excel'
 
 describe('excel roster detection', () => {
   const rows = [
@@ -53,5 +53,31 @@ describe('headerless roster detection', () => {
     ]
 
     expect(resolveHeader(rows)).toMatchObject({ headerIndex: 0, headerless: false })
+  })
+})
+
+describe('manual header row override', () => {
+  const rawRows = [
+    ['活動報名表'],
+    ['班級', '座號', '姓名'],
+    ['101', '1', '邱紘睿'],
+    ['101', '2', '黃宥寧'],
+  ]
+
+  it('rebuilds headers and data from a chosen header row', () => {
+    const frame = buildFrameFromRows(rawRows, 2)
+
+    expect(frame.headerRow).toBe(2)
+    expect(frame.headers).toEqual(['班級', '座號', '姓名'])
+    expect(frame.rowCount).toBe(2)
+    expect(frame.rows[0].姓名).toBe('邱紘睿')
+  })
+
+  it('treats header row 0 as headerless and keeps all rows', () => {
+    const frame = buildFrameFromRows(rawRows, 0)
+
+    expect(frame.headerRow).toBe(0)
+    expect(frame.headers[0]).toBe('欄位1')
+    expect(frame.rowCount).toBe(4)
   })
 })

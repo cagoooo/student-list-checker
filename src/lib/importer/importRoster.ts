@@ -1,5 +1,5 @@
 import { detectRosterFields } from './fieldDetection'
-import { parseExcelTables } from './excel'
+import { buildFrameFromRows, parseExcelTables } from './excel'
 import { ocrPdfTables, type OcrProgress } from './ocr'
 import { parsePdfTables } from './pdf'
 import { buildImportedRows, parseStudentsFromTable } from './studentSource'
@@ -102,6 +102,23 @@ export function selectCandidateTable(result: ImportDetectionResult, candidateId:
     ...result,
     selectedTable,
     ...buildSelectedTablePayload(selectedTable, fieldDetection, importedRows),
+  }
+}
+
+// 讓使用者手動重指定標題列（0 = 無標題列）：用保留的 rawRows 重建表格、重新偵測欄位。
+export function applyHeaderRow(result: ImportDetectionResult, headerRow: number): ImportDetectionResult {
+  const current = result.selectedTable
+  if (!current?.rawRows) return result
+
+  const rebuilt: CandidateTable = { ...current, ...buildFrameFromRows(current.rawRows, headerRow) }
+  const fieldDetection = detectRosterFields(rebuilt)
+  const importedRows = buildImportedRows(rebuilt.rows, fieldDetection.columnMap)
+
+  return {
+    ...result,
+    selectedTable: rebuilt,
+    candidates: result.candidates.map((candidate) => (candidate.id === rebuilt.id ? rebuilt : candidate)),
+    ...buildSelectedTablePayload(rebuilt, fieldDetection, importedRows),
   }
 }
 

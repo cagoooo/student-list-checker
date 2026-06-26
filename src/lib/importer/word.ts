@@ -93,6 +93,7 @@ function tablesFromTableHtml(html: string, sourceName: string): CandidateTable[]
         headers,
         rows: dataRows,
         rowCount: dataRows.length,
+        rawRows: grid,
       }
     })
     .filter((table): table is CandidateTable => table !== null)

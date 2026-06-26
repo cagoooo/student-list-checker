@@ -24,7 +24,11 @@ import {
 } from './lib/firebase'
 import { detectColumns, parseExcelTables } from './lib/importer/excel'
 import { summarizeImportDiagnostics } from './lib/importer/diagnostics'
-import { importRosterFile, selectCandidateTable as selectImportCandidateTable } from './lib/importer/importRoster'
+import {
+  applyHeaderRow as applyImportHeaderRow,
+  importRosterFile,
+  selectCandidateTable as selectImportCandidateTable,
+} from './lib/importer/importRoster'
 import { buildCorrectedWordBlob } from './lib/importer/exportWord'
 import { recallColumnMap, rememberColumnMap } from './lib/importer/columnMemory'
 import {
@@ -219,6 +223,14 @@ function App() {
       localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(next.sourceStudents))
       setDatabaseMode('local')
     }
+  }
+
+  function changeHeaderRow(headerRow: number) {
+    if (!importDetection) return
+    const next = applyImportHeaderRow(importDetection, headerRow)
+    setImportDetection(next)
+    setRows(next.importedRows)
+    setColumnMap(next.fieldDetection.columnMap)
   }
 
   async function copyImportDiagnostics() {
@@ -426,6 +438,13 @@ function App() {
               onChange={selectCandidateTable}
             />
           ) : null}
+          {importDetection?.selectedTable?.rawRows ? (
+            <HeaderRowSelect
+              headerRow={importDetection.selectedTable.headerRow}
+              rawRows={importDetection.selectedTable.rawRows}
+              onChange={changeHeaderRow}
+            />
+          ) : null}
           <ColumnSelect
             label="班級欄位"
             value={columnMap.classKey}
@@ -602,6 +621,31 @@ function ColumnSelect({
         {headers.map((header) => (
           <option key={header} value={header}>
             {header}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function HeaderRowSelect({
+  headerRow,
+  rawRows,
+  onChange,
+}: {
+  headerRow: number
+  rawRows: string[][]
+  onChange: (headerRow: number) => void
+}) {
+  const preview = (cells: string[]) => cells.filter(Boolean).slice(0, 4).join('・') || '（空白列）'
+  return (
+    <label className="field">
+      <span>標題列</span>
+      <select value={headerRow} onChange={(event) => onChange(Number(event.target.value))}>
+        <option value={0}>無標題列（整份視為資料）</option>
+        {rawRows.slice(0, 12).map((cells, index) => (
+          <option key={index} value={index + 1}>
+            第 {index + 1} 列：{preview(cells)}
           </option>
         ))}
       </select>

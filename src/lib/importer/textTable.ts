@@ -59,6 +59,7 @@ export function tablesFromTextRows(
       headers,
       rows: dataRows,
       rowCount: dataRows.length,
+      rawRows: cellRows,
     },
   ]
 }

@@ -69,6 +69,43 @@ export function resolveHeader(rows: unknown[][]): ResolvedHeader {
   return { headerIndex: index, headers: normalizeHeaders(rows[index] ?? []), headerless: false }
 }
 
+export function hasRowContent(row: Record<string, unknown>) {
+  return Object.entries(row)
+    .filter(([key]) => !key.startsWith('__'))
+    .some(([, value]) => toText(value) !== '')
+}
+
+// 依指定的標題列（1-based；0 或負數代表無標題列）重建欄名與資料列。headerRow 省略時走自動判定。
+export function buildFrameFromRows(rawRows: unknown[][], headerRowOverride?: number) {
+  let headers: string[]
+  let dataStart: number
+  let headerRow: number
+
+  if (headerRowOverride === undefined) {
+    const resolved = resolveHeader(rawRows)
+    headers = resolved.headers
+    dataStart = resolved.headerless ? 0 : resolved.headerIndex + 1
+    headerRow = resolved.headerless ? 0 : resolved.headerIndex + 1
+  } else if (headerRowOverride <= 0) {
+    const width = rawRows.reduce((max, row) => Math.max(max, row.length), 0)
+    headers = normalizeHeaders(new Array(width).fill(''))
+    dataStart = 0
+    headerRow = 0
+  } else {
+    const index = headerRowOverride - 1
+    headers = normalizeHeaders(rawRows[index] ?? [])
+    dataStart = index + 1
+    headerRow = headerRowOverride
+  }
+
+  const rows = rawRows
+    .slice(dataStart)
+    .map((row, index) => toRecord(row, headers, dataStart + index + 1))
+    .filter(hasRowContent)
+
+  return { headerRow, headers, rows, rowCount: rows.length }
+}
+
 export function toRecord(row: unknown[], headers: string[], rowNo: number): Record<string, unknown> {
   const record: Record<string, unknown> = { [ROW_NUMBER_KEY]: rowNo }
   headers.forEach((header, index) => {
@@ -106,6 +143,7 @@ export function parseExcelTables(buffer: ArrayBuffer, sourceName: string): Candi
       headers,
       rows,
       rowCount: rows.length,
+      rawRows: sheetRows.map((row) => row.map((cell) => toText(cell))),
     }
   })
 }

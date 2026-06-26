@@ -10,6 +10,8 @@ export type CandidateTable = {
   headers: string[]
   rows: Record<string, unknown>[]
   rowCount: number
+  // 解析前的完整列（字串化），保留供使用者手動重指定標題列用。
+  rawRows?: string[][]
 }
 
 export type FieldDetection = {
