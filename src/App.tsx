@@ -363,6 +363,15 @@ function App() {
     setMessage('已登出 Firebase，系統會繼續使用目前瀏覽器中的資料。')
   }
 
+  function handleReset() {
+    setRows([])
+    setFileName('')
+    setBackendReport(null)
+    setBackendStatus('local')
+    setActiveOcrJob(null)
+    setMessage('')
+  }
+
   return (
     <main className="app-shell">
       {updateReady ? (
@@ -421,6 +430,16 @@ function App() {
                   }}
                 />
               ) : null}
+              <div className="summary-actions">
+                <label className="primary-button">
+                  <Upload size={16} />
+                  比對下一份名單
+                  <input type="file" accept={ACCEPTED_FORMATS} onChange={handleFile} />
+                </label>
+                <button type="button" className="ghost-button" onClick={handleReset}>
+                  清除結果
+                </button>
+              </div>
             </div>
             <div className="metric-grid" aria-label="校對統計">
               <Metric label="通過" value={stats.pass} tone="success" />
@@ -490,16 +509,16 @@ function App() {
                     <tbody>
                       {displayIssues.map((result) => (
                         <tr key={result.id} className={`row-${result.status}`}>
-                          <td>
+                          <td data-label="狀態">
                             <StatusBadge status={result.status} />
                           </td>
-                          <td>{result.rowNo}</td>
-                          <td>{result.sourceLabel || '—'}</td>
-                          <td>{result.classValue || '未填'}</td>
-                          <td>{result.seatNo || '未填'}</td>
-                          <td>{result.name || '未填'}</td>
-                          <td>{result.issue}</td>
-                          <td>
+                          <td data-label="列號">{result.rowNo}</td>
+                          <td data-label="來源">{result.sourceLabel || '—'}</td>
+                          <td data-label="班級">{result.classValue || '未填'}</td>
+                          <td data-label="座號">{result.seatNo || '未填'}</td>
+                          <td data-label="姓名">{result.name || '未填'}</td>
+                          <td data-label="提示">{result.issue}</td>
+                          <td data-label="比對結果">
                             {result.suggestion ? (
                               <span className="suggestion">
                                 {result.suggestion.className} {result.suggestion.seatNo}號{' '}
@@ -509,7 +528,7 @@ function App() {
                               <span className="muted">無</span>
                             )}
                           </td>
-                          <td>{result.confidence}%</td>
+                          <td data-label="信心">{result.confidence}%</td>
                         </tr>
                       ))}
                     </tbody>
