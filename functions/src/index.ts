@@ -299,16 +299,16 @@ export const processOcrJob = onObjectFinalized(
       const [buffer] = await file.download()
       await jobRef.update({
         updatedAt: FieldValue.serverTimestamp(),
-        progress: 35,
-        message: 'OCR worker 已讀取暫存 PDF，正在辨識名單資料。',
+        progress: 25,
+        message: 'OCR worker 已讀取暫存 PDF，正在判斷文字層…',
       })
 
       const parsed = await parseOcrPdf(buffer)
       const rows = assertRows(parsed.rows)
       await jobRef.update({
         updatedAt: FieldValue.serverTimestamp(),
-        progress: 70,
-        message: 'OCR worker 已取得名單列資料，正在進行學生資料庫校對。',
+        progress: 75,
+        message: `OCR worker 已完成名單辨識（共 ${rows.length} 筆），正在進行學生資料庫校對。`,
       })
 
       const students = await loadStudents()
@@ -464,12 +464,69 @@ async function parseRosterFile(fileName: string, buffer: Buffer) {
 }
 
 async function parseOcrPdf(buffer: Buffer) {
+  // 先嘗試文字抽取（文字型 PDF 直接走此路徑）
   const rows = await pdfTextRows(buffer)
-  if (rows.length === 0) {
-    throw new Error('OCR worker 管線已建立，但目前尚未接入影像 OCR 引擎；這份 PDF 沒有可抽取的文字。')
+  if (rows.length > 0) {
+    return rowsToRosterRows(rows, 'pdf' as const)
   }
 
-  return rowsToRosterRows(rows, 'pdf' as const)
+  // 文字層為空，改走影像 OCR
+  const ocrRows = await pdfImageOcr(buffer)
+  if (ocrRows.length === 0) {
+    throw new Error(
+      '這份 PDF 沒有可抽取的文字，影像 OCR 辨識後也未找到名單資料。' +
+      '請確認 PDF 清晰度（至少 150 DPI），或改用 Excel / CSV 格式上傳。',
+    )
+  }
+  return rowsToRosterRows(ocrRows, 'pdf' as const)
+}
+
+async function pdfImageOcr(buffer: Buffer): Promise<string[][]> {
+  const { createCanvas } = await import('@napi-rs/canvas')
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const tesseract = await import('tesseract.js')
+  const { fileURLToPath } = await import('url')
+  const nodePath = await import('path')
+
+  const currentDir = nodePath.default.dirname(fileURLToPath(import.meta.url))
+  const langPath = nodePath.default.join(currentDir, '..', 'lang')
+
+  const pdf = await pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    useSystemFonts: true,
+  }).promise
+
+  const worker = await tesseract.createWorker(['chi_tra', 'eng'], 1, {
+    langPath,
+    cacheMethod: 'none',
+  })
+
+  const allLines: string[] = []
+
+  try {
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber)
+      const viewport = page.getViewport({ scale: 2.0 })
+
+      const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height))
+      const context = canvas.getContext('2d')
+
+      await page.render({
+        canvasContext: context as unknown as CanvasRenderingContext2D,
+        viewport,
+        canvas: null as unknown as HTMLCanvasElement,
+      }).promise
+
+      const imageBuffer = canvas.toBuffer('image/png')
+      const { data: { text } } = await worker.recognize(imageBuffer)
+      const lines = text.split(/\r?\n/).map((line: string) => line.trim()).filter(Boolean)
+      allLines.push(...lines)
+    }
+  } finally {
+    await worker.terminate()
+  }
+
+  return allLines.map(splitTextLine).filter((row) => row.some(Boolean))
 }
 
 async function docxTableRows(buffer: Buffer) {

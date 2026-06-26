@@ -13,11 +13,13 @@
     "logs": "firebase functions:log"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.1",
     "exceljs": "^4.4.0",
     "firebase-admin": "^13.6.0",
     "firebase-functions": "^7.2.5",
     "mammoth": "^1.12.0",
-    "pdfjs-dist": "^6.0.227"
+    "pdfjs-dist": "^6.0.227",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "typescript": "^6.0.2"

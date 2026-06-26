@@ -1,0 +1,156 @@
+請接手 `H:\Refine` 的「學生名單校對平台」開發。
+
+重要協作規則：
+- 一律用繁體中文回報。
+- 學校是「桃園市龍潭區石門國民小學 / 石門國小」，不是新明。
+- 小修正做完可直接 commit + push，不用反覆詢問。
+- GitHub repo: https://github.com/cagoooo/student-list-checker.git
+- 目前分支 `main`，慣例是直接推 `main`。
+- 教學用 Firebase / GCP 操作要使用學校帳號：
+  `ipad@mail2.smes.tyc.edu.tw`
+  firebase / gcloud 指令務必加：
+  `--account=ipad@mail2.smes.tyc.edu.tw`
+- 提交前請 grep：
+  `rg -n "新明" . --glob "!node_modules/**" --glob "!functions/node_modules/**" --glob "!dist/**"`
+  若只出現在交接提醒或檢查清單可接受；正式文案不可寫成新明。
+
+產品方向：
+這不是「修正版文件產生器」。
+核心目標是：
+老師上傳檔案後，系統在後端辨識並用正式學生資料庫比對，前端只回報：
+1. 這份名單是否全部正確
+2. 哪些學生姓名可能 KEY 錯
+3. 哪些班級 / 座號 / 姓名對不起來
+4. 哪些資料查無此人
+
+老師不需要下載修正版，也不需要在平台上編輯名單。
+
+目前已完成：
+- 前端已改成「名單檢查報告」模式。
+- 結果頁只顯示整份名單狀態與需要老師確認的問題清單。
+- 已移除主流程的「套用全部建議 / 下載修正版」。
+- 中文姓名校正引擎第一版已完成：
+  `src/lib/importer/nameMatch.ts`
+- 後端 Firebase Functions 骨架已建立：
+  `functions/`
+- 已新增 callable functions：
+  - `validateRosterRows`
+  - `validateRosterFile`
+  - `createOcrJob`
+- 後端已支援：
+  - `.xlsx`
+  - `.csv`
+  - `.docx`
+  - 文字型 PDF
+- 後端校對會讀 Firestore `students`，回傳：
+  - `summary`
+  - `issues`
+  - `validationId`
+- 後端校對摘要會寫入 Firestore：
+  `validations/{validationId}`
+- OCR job tracking 已建立：
+  `ocrJobs/{jobId}`
+- 掃描 PDF 若同步後端解析失敗，前端會建立 OCR 背景工作。
+- 已新增 Storage-backed OCR worker 第一版：
+  - `createOcrJob` 會把 PDF 暫存到 Storage：
+    `ocr-jobs/{uid}/{jobId}/source.pdf`
+  - `processOcrJob` 由 Storage finalized event 觸發
+  - worker 會更新 job 狀態：
+    `queued / processing / completed / failed`
+  - worker 成功或失敗都會嘗試刪除暫存 PDF
+  - worker 完成後會寫入 `validations`
+  - worker 也會把 `resultSummary`、`resultIssueCount`、`resultIssues` 寫回 `ocrJobs/{jobId}`
+- 已新增 `storage.rules`，前端預設不能讀寫 Storage；OCR PDF 只由 Functions Admin SDK 處理。
+- 前端已接上 OCR job 即時狀態：
+  - 監聽 `ocrJobs/{jobId}`
+  - summary 區顯示進度條、百分比、job 編號、完成後的 validation id
+  - 等待中不再顯示上一份範例資料
+  - 失敗時顯示明確原因
+  - 完成後會直接顯示正式「需要老師確認的項目」報告
+
+最近 commits：
+- `8d7fbe2 feat: focus UI on roster validation report`
+- `54780a6 feat: add Firebase backend roster validation`
+- `a9cabbe feat: validate xlsx and csv files on backend`
+- `519eef7 feat: validate docx files on backend`
+- `0437dc1 feat: validate text pdf files on backend`
+- `23101bc feat: record backend validation summaries`
+- `727b15b feat: add OCR job tracking scaffold`
+- `6bb0fa9 feat: add storage-backed OCR worker`
+- `914bc2d feat: show OCR job progress in UI`
+
+目前尚未部署 Firebase Functions。
+原因：還需要正式 Firebase project / secrets / 學校帳號部署設定。
+
+接手第一步：
+1. `cd H:\Refine`
+2. `git pull`
+3. `npm install`
+4. `cd functions && npm install && npm run build`
+5. 回 repo root 後跑：
+   - `npm run test`
+   - `npx tsc -b`
+   - `npm run lint`
+   - `npm run build`
+   - `cd functions && npm run build`
+
+重要安全原則：
+- 不要把原始 PDF 存進 Firestore。
+- 原始 PDF 只能短期存在 Storage path。
+- worker 成功或失敗都應盡量刪除暫存檔。
+- 校對紀錄只保存摘要與問題清單，不保存完整原始名單。
+- 掃描 OCR 比較重，應用背景 job，不要讓老師畫面同步等待。
+
+目前 OCR worker 狀態：
+- worker 管線已完成。
+- 目前 `parseOcrPdf()` 仍主要使用 PDF 文字抽取。
+- 若 PDF 是純影像掃描、沒有文字層，會失敗並提示：
+  「OCR worker 管線已建立，但目前尚未接入影像 OCR 引擎；這份 PDF 沒有可抽取的文字。」
+- 下一步重點是接入真正影像 OCR 引擎。
+
+下一步建議：
+1. 實作真正影像 OCR 引擎
+   可評估兩條路：
+   - 短期：Functions 端接 `tesseract.js` + PDF render，但要注意 Cloud Functions Node 22、中文字庫、冷啟動、記憶體與部署體積。
+   - 穩定正式版：接 Google Cloud Vision 或 Document AI，但需要正式 GCP project、API 啟用、費用控管與 IAM。
+2. 優先保持漸進式：
+   - 不要把大 OCR 同步塞進 callable function。
+   - 影像 OCR 應接在 `processOcrJob` / `parseOcrPdf()` 內。
+   - OCR 產出 rows 後繼續走既有 `rowsToRosterRows()` 與 `validateRows()`。
+3. 前端可再補：
+   - OCR job 完成後，如果 result issues 很多，要確認 UI scroll / table 表現。
+   - 可加「重新上傳較清晰檔案」提示。
+   - 可設計 job timeout / 長時間處理提示。
+4. 後端可再補：
+   - Storage lifecycle / TTL 清理策略。
+   - failed job 的暫存檔清理補償機制。
+   - OCR job Firestore index 如未來要列表查詢再補。
+   - resultIssues 若大量，要考慮只保存 issue，不保存完整 rows；目前符合此原則。
+
+相關檔案：
+- `src/App.tsx`
+- `src/App.css`
+- `src/lib/backendValidation.ts`
+- `src/lib/firebase.ts`
+- `src/lib/importer/nameMatch.ts`
+- `functions/src/index.ts`
+- `firestore.rules`
+- `storage.rules`
+- `firebase.json`
+- `FIREBASE_SETUP.md`
+- `PROGRESS.md`
+- `ROADMAP.md`
+- `README.md`
+
+完成任何修改後請驗證：
+- `npm run test`
+- `npx tsc -b`
+- `npm run lint`
+- `npm run build`
+- `cd functions && npm run build`
+
+部署提醒：
+- Functions：
+  `firebase --account=ipad@mail2.smes.tyc.edu.tw deploy --only functions`
+- Firestore / Storage rules：
+  `firebase --account=ipad@mail2.smes.tyc.edu.tw deploy --only firestore:rules,storage`

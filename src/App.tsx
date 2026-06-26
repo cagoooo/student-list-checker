@@ -80,6 +80,7 @@ function App() {
     `已載入 ${DEFAULT_STUDENTS.length} 位學生資料，可直接測試名單檢查流程。`,
   )
   const [updateReady, setUpdateReady] = useState(false)
+  const [ocrElapsedSeconds, setOcrElapsedSeconds] = useState(0)
 
   useEffect(() => {
     registerServiceWorker(() => setUpdateReady(true))
@@ -154,6 +155,16 @@ function App() {
           : 'success'
   // Firebase 已設定時，必須具備 admin 權限才能更新資料庫；未設定 Firebase 才保留本機模式。
   const canUpdateDatabase = !firebaseReady || isAdmin
+
+  useEffect(() => {
+    if (!isOcrJobPending) {
+      setOcrElapsedSeconds(0)
+      return undefined
+    }
+    setOcrElapsedSeconds(0)
+    const interval = setInterval(() => setOcrElapsedSeconds((prev) => prev + 1), 1000)
+    return () => clearInterval(interval)
+  }, [isOcrJobPending])
 
   useEffect(() => {
     if (!firebaseReady) return undefined
@@ -473,7 +484,17 @@ function App() {
             資料庫來源：{databaseModeLabel(databaseMode)}，目前載入 {students.length} 位學生；校對模式：{backendModeLabel(backendStatus)}
             {validationId ? `；紀錄編號：${validationId}` : ''}
           </p>
-          {activeOcrJob ? <OcrJobProgress job={activeOcrJob} /> : null}
+          {activeOcrJob ? (
+            <OcrJobProgress
+              job={activeOcrJob}
+              elapsedSeconds={ocrElapsedSeconds}
+              onReupload={() => {
+                setActiveOcrJob(null)
+                setBackendReport(null)
+                setBackendStatus('local')
+              }}
+            />
+          ) : null}
         </div>
         <div className="metric-grid" aria-label="校對統計">
           <Metric label="通過" value={stats.pass} tone="success" />
@@ -692,13 +713,23 @@ function Metric({
   )
 }
 
-function OcrJobProgress({ job }: { job: BackendOcrJobStatus }) {
+function OcrJobProgress({
+  job,
+  elapsedSeconds,
+  onReupload,
+}: {
+  job: BackendOcrJobStatus
+  elapsedSeconds: number
+  onReupload: () => void
+}) {
   const tone = job.status === 'failed' ? 'danger' : job.status === 'completed' ? 'success' : 'active'
   const progress = job.status === 'queued' ? Math.max(job.progress, 4) : job.progress
+  const isPending = job.status === 'queued' || job.status === 'processing'
+  const isLongWait = isPending && elapsedSeconds >= 180
   return (
     <div className={`ocr-progress ocr-progress-${tone}`} role="status">
       <div className="ocr-progress__header">
-        <span>{ocrStatusLabel(job.status)}</span>
+        <span>{ocrStatusLabel(job.status)}{isPending && elapsedSeconds > 0 ? `（已等待 ${elapsedSeconds} 秒）` : ''}</span>
         <strong>{job.status === 'failed' ? '未完成' : `${progress}%`}</strong>
       </div>
       <div
@@ -716,6 +747,17 @@ function OcrJobProgress({ job }: { job: BackendOcrJobStatus }) {
         {job.resultValidationId ? <span>校對紀錄：{job.resultValidationId}</span> : null}
       </div>
       <p>{job.errorMessage ?? job.message}</p>
+      {isLongWait ? (
+        <p className="ocr-progress__timeout-hint">
+          背景辨識時間較長，掃描 PDF 頁數多或解析度高時正常。可繼續等待，或改用 Excel / CSV 重新上傳。
+        </p>
+      ) : null}
+      {(job.status === 'failed' || isLongWait) ? (
+        <button type="button" className="ghost-button ocr-progress__reupload" onClick={onReupload}>
+          <Upload size={16} />
+          重新上傳其他檔案
+        </button>
+      ) : null}
     </div>
   )
 }

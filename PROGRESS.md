@@ -31,7 +31,8 @@
 | Firebase SDK | 已完成 | 已加入 Firebase 初始化、Google 登入、Firestore 讀寫服務 | 未設定 env 時會退回匿名示範模式 |
 | Firebase Functions | 已完成第一版 | 新增 `validateRosterRows` / `validateRosterFile` 後端函式，支援後端校對與 `.xlsx` / `.csv` / `.docx` / 文字型 PDF 後端解析 | 尚待部署至正式 Firebase project |
 | 校對紀錄 | 已完成第一版 | 後端校對會寫入 `validations` 摘要紀錄，前端顯示紀錄編號 | 不保存原始檔或完整名單 |
-| OCR 背景工作 | 已完成第一版 | `createOcrJob` 會將掃描 PDF 暫存到短期 Storage path，`processOcrJob` worker 會更新狀態並走同一套後端校對流程 | 影像 OCR 引擎尚待接入；目前 worker 管線先支援可抽取文字的 PDF |
+| OCR 背景工作 | 已完成第二版 | `createOcrJob` 暫存 PDF；`processOcrJob` 先試 pdfjs-dist 文字抽取，若為空白（純影像 PDF）自動切換至 tesseract.js（`chi_tra+eng`，語言資料打包進 `functions/lang/`）；進度訊息更細緻 | 尚待部署至正式 Firebase project |
+| 前端 OCR 進度 UI | 已補強 | `OcrJobProgress` 組件加入：等待秒數計時、超過 180 秒顯示超時提示、失敗或超時後顯示「重新上傳其他檔案」按鈕 | — |
 | Firestore 資料模型 | 已完成 | 已定義 `students`、`studentDatabaseMeta`、`admins` | 詳見 `FIREBASE_SETUP.md` |
 | Firestore 安全規則 | 已完成 | 預設拒絕；僅 `admins/{uid}` 可讀寫學生資料 | 需部署到 Firebase project |
 | GitHub Secrets 串接 | 已完成 | GitHub Actions 已可接收 `VITE_FIREBASE_*` secrets | 尚待填入正式 Firebase Web App config |

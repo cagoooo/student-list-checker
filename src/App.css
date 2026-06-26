@@ -305,6 +305,23 @@ h2 {
   background: #c64c42;
 }
 
+.ocr-progress__timeout-hint {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.ocr-progress__reupload {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

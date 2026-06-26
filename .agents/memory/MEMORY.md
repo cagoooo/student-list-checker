@@ -1,0 +1,1 @@
+- [OCR engine in functions](ocr-engine-functions.md) — tesseract.js + @napi-rs/canvas 影像 OCR 已接入 processOcrJob；語言資料打包在 functions/lang/
