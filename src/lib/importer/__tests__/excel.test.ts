@@ -92,7 +92,8 @@ describe('class-coded sheets', () => {
       XLSX.utils.aoa_to_sheet([
         ['座號', '顯示名稱(最多16個字元)', 'Email', '組別'],
         ['1', '石爵綸', '1100150@mail2.smes.tyc.edu.tw', '1'],
-        ['2', '孫禾華', '1100159@mail2.smes.tyc.edu.tw', '2'],
+        ['2', '', '', '2'],
+        ['3', '楊祐軒', '1100136@mail2.smes.tyc.edu.tw', '3'],
       ]),
       '501',
     )
@@ -116,6 +117,12 @@ describe('class-coded sheets', () => {
       classValue: '501',
       seatNo: '01',
       name: '石爵綸',
+      sourceLabel: '501',
+    })
+    expect(result.importedRows[1]).toMatchObject({
+      classValue: '501',
+      seatNo: '03',
+      name: '楊祐軒',
       sourceLabel: '501',
     })
     expect(result.importedRows[2]).toMatchObject({

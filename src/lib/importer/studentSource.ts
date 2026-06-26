@@ -4,7 +4,9 @@ import { ROW_NUMBER_KEY, SOURCE_LOCATION_KEY, classOrder, normalizeName, normali
 
 export function buildImportedRows(data: Record<string, unknown>[], map?: ColumnMap): ImportedRow[] {
   const detected = map ?? {}
-  return data.map((raw, index) => hydrateRow(raw, Number(raw[ROW_NUMBER_KEY]) || index + 2, detected))
+  return data
+    .map((raw, index) => hydrateRow(raw, Number(raw[ROW_NUMBER_KEY]) || index + 2, detected))
+    .filter((row) => !isEmptyAccountTemplateSlot(row))
 }
 
 // 拆解「班級座號」合併欄位，如 60501 → { classCode: '605', seatNo: '01' }
@@ -50,6 +52,15 @@ export function hydrateRow(raw: Record<string, unknown>, rowNo: number, map: Col
     seatNo: normalizeSeat(toText(raw[map.seatKey ?? ''])),
     name: normalizeName(toText(raw[map.nameKey ?? ''])),
   }
+}
+
+function isEmptyAccountTemplateSlot(row: ImportedRow) {
+  if (row.name) return false
+
+  const emailEntry = Object.entries(row.raw).find(([key]) => /email/i.test(key))
+  if (!emailEntry) return false
+
+  return toText(emailEntry[1]) === ''
 }
 
 export function applyStudentToRaw(raw: Record<string, unknown>, student: Student, map: ColumnMap) {
