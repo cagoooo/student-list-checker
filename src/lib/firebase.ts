@@ -146,6 +146,63 @@ export async function loadFirebaseStudents() {
   })
 }
 
+// 用 REST API 載入學生（不需要登入）—— allow read: if true 時可直接呼叫
+type FirestoreValue =
+  | { stringValue: string }
+  | { integerValue: string }
+  | { doubleValue: number }
+  | { booleanValue: boolean }
+  | { nullValue: null }
+  | { timestampValue: string }
+
+function readField(v: FirestoreValue | undefined): string | number {
+  if (!v) return ''
+  if ('stringValue' in v) return v.stringValue
+  if ('integerValue' in v) return Number(v.integerValue)
+  if ('doubleValue' in v) return v.doubleValue
+  if ('timestampValue' in v) return v.timestampValue
+  return ''
+}
+
+export async function loadStudentsPublic(): Promise<Student[]> {
+  const projectId = firebaseConfig.projectId
+  const apiKey = firebaseConfig.apiKey
+  if (!projectId || !apiKey) return []
+
+  const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/students`
+  const students: Student[] = []
+  let pageToken = ''
+
+  do {
+    const url = `${base}?key=${apiKey}&pageSize=300${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Firestore REST ${res.status}`)
+    const json = await res.json() as {
+      documents?: Array<{ name: string; fields: Record<string, FirestoreValue> }>
+      nextPageToken?: string
+    }
+    for (const docEntry of json.documents ?? []) {
+      const f = docEntry.fields ?? {}
+      const id = docEntry.name.split('/').pop() ?? ''
+      students.push({
+        id,
+        studentNo: String(readField(f.studentNo) ?? ''),
+        grade: Number(readField(f.grade) ?? 0),
+        classNo: Number(readField(f.classNo) ?? 0),
+        className: String(readField(f.className) ?? ''),
+        classCode: String(readField(f.classCode) ?? ''),
+        seatNo: String(readField(f.seatNo) ?? ''),
+        name: String(readField(f.name) ?? ''),
+        gender: String(readField(f.gender) ?? ''),
+        updatedAt: String(readField(f.updatedAt) ?? ''),
+      } satisfies Student)
+    }
+    pageToken = json.nextPageToken ?? ''
+  } while (pageToken)
+
+  return students
+}
+
 export async function saveFirebaseStudents(students: Student[], sourceFile: string) {
   const currentRuntime = getFirebaseRuntime()
   if (!currentRuntime) {

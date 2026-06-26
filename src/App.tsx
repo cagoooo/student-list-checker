@@ -26,6 +26,7 @@ import {
   checkIsAdmin,
   isFirebaseEnabled,
   loadFirebaseStudents,
+  loadStudentsPublic,
   saveFirebaseStudents,
   signInWithGoogle,
   signOutFirebase,
@@ -178,7 +179,8 @@ function App() {
     if (!firebaseReady) return
     const hasLocal = Boolean(loadStoredStudents())
     if (hasLocal) return
-    loadFirebaseStudents()
+    // 用 REST API（不需 auth）載入真實學生資料，allow read: if true 已部署
+    loadStudentsPublic()
       .then((firebaseStudents) => {
         if (firebaseStudents.length > 0) {
           setStudents(firebaseStudents)
