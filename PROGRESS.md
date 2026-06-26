@@ -6,70 +6,80 @@
 
 建立一套給桃園市龍潭區石門國民小學使用的學生名單校對平台，讓行政人員或老師上傳名單後，系統能自動在後端辨識檔案內容，並用正式學生資料庫比對班級、座號、姓名。前端只需要清楚回報「整份名單是否正確」以及「哪些學生姓名可能 KEY 錯或資料不符」，降低獎狀、報名表、活動名冊等行政資料誤植機率。正式主線不要求老師下載修正版再處理一次文件。
 
+---
+
 ## 目前完成進度
 
-| 模組 | 目前狀態 | 完成內容 | 備註 |
-|---|---|---|---|
-| 專案骨架 | 已完成 | 建立 Vite + React + TypeScript 前端專案 | 可用 `npm run dev` 啟動 |
-| 基礎 UI | 已完成 | 建立學生名單校對平台主畫面 | 支援桌機與手機版檢查 |
-| 校對結果回報頁 | 已完成 | 前端改為顯示整份名單狀態與需確認問題清單 | 不再把修正版下載 / 套用修正放在主要流程 |
-| 名單上傳 | 已完成 | 支援 `.xlsx`、`.xls`、`.csv` 老師名單上傳 | PDF / Word 已可解析（見下） |
-| PDF 名單解析 | 已完成 | 抽取 PDF 文字、保留每列頁碼、依文字項寬度切分多欄版面 | 透過 `src/lib/importer/pdf.ts` |
-| PDF 影像 OCR 後援 | 已完成 | 文字抽取失敗時用 tesseract.js（chi_tra+eng）對頁面影像辨識 | `src/lib/importer/ocr.ts`，動態載入、附逐頁進度與離線後援 |
-| Word 名單解析 | 已完成 | 讀取 `.docx` 表格（含合併儲存格還原）與段落 / 條列名單 | 透過 `src/lib/importer/word.ts` |
-| 舊版 .doc 後援 | 已完成 | best-effort 從 .doc 二進位還原文字（UTF-16LE、儲存格標記轉欄位） | 失敗時提示轉成 Excel / CSV |
-| 來源位置標註 | 已完成 | 校對結果列顯示「來源」欄（PDF 頁碼 / Word 段落） | 一路帶到下載輸出 |
-| 修正版 Word 輸出 | 已完成 | 一鍵把校對後名單輸出成 `.docx` | `src/lib/importer/exportWord.ts`，docx 套件動態載入 |
-| 統一匯入管線 | 已完成 | Excel / CSV / PDF / Word 共用同一套解析、欄位偵測、信心評分流程 | `src/lib/importer/importRoster.ts` |
-| 匯入診斷 | 已完成 | 顯示偵測到的表格、欄位對應與信心分數，匯入失敗時提供診斷訊息 | `src/lib/importer/diagnostics.ts` |
-| 欄位辨識 | 已完成 | 自動偵測班級、座號、姓名欄位並計算偵測信心 | 可手動調整欄位對應 |
-| 無標題列韌性 | 已完成 | 沒有欄名的檔案不再吃掉第一位學生，整份視為資料並用內容推測欄位 | `resolveHeader`，三種解析器共用 |
-| 記住欄位對應 | 已完成 | 以表頭簽章記住老師手動調整的欄位對應，同結構檔案自動套用 | `src/lib/importer/columnMemory.ts` |
-| 標題列逃生口 | 已完成 | 自動判斷錯誤時可手動重指定標題列或標記為無標題列 | 欄位對應區「標題列」下拉，附每列預覽 |
-| 學生資料庫種子 | 已完成 | 已從本機學務系統匯出檔匯入 795 位學生，公開版已匿名化 | 輸出至 `src/data/students.json` |
-| 學生資料庫更新 | 已完成 | 前端可上傳新的學生資料概況 `.xls` 更新本機資料庫 | 目前暫存於瀏覽器 `localStorage` |
-| Firebase SDK | 已完成 | 已加入 Firebase 初始化、Google 登入、Firestore 讀寫服務 | 未設定 env 時會退回匿名示範模式 |
-| Firebase Functions | 已完成第一版 | 新增 `validateRosterRows` / `validateRosterFile` 後端函式，支援後端校對與 `.xlsx` / `.csv` / `.docx` / 文字型 PDF 後端解析 | 尚待部署至正式 Firebase project |
-| 校對紀錄 | 已完成第一版 | 後端校對會寫入 `validations` 摘要紀錄，前端顯示紀錄編號 | 不保存原始檔或完整名單 |
-| OCR 背景工作 | 已完成第二版 | `createOcrJob` 暫存 PDF；`processOcrJob` 先試 pdfjs-dist 文字抽取，若為空白（純影像 PDF）自動切換至 tesseract.js（`chi_tra+eng`，語言資料打包進 `functions/lang/`）；進度訊息更細緻 | 尚待部署至正式 Firebase project |
-| 前端 OCR 進度 UI | 已補強 | `OcrJobProgress` 組件加入：等待秒數計時、超過 180 秒顯示超時提示、失敗或超時後顯示「重新上傳其他檔案」按鈕 | — |
-| Firestore 資料模型 | 已完成 | 已定義 `students`、`studentDatabaseMeta`、`admins` | 詳見 `FIREBASE_SETUP.md` |
-| Firestore 安全規則 | 已完成 | 預設拒絕；僅 `admins/{uid}` 可讀寫學生資料 | 需部署到 Firebase project |
-| GitHub Secrets 串接 | 已完成 | GitHub Actions 已可接收 `VITE_FIREBASE_*` secrets | 尚待填入正式 Firebase Web App config |
-| 資料庫匯入腳本 | 已完成 | 新增 `scripts/import-students.mjs` | 可用 `npm run import:students -- "<檔案路徑>"` 重建種子資料 |
-| 校對邏輯 | 已完成 | 比對班級、座號、姓名，產生通過、待確認、錯誤狀態 | 支援班級格式正規化、座號補零與中文姓名模糊校正 |
-| 中文姓名校正 | 已完成 | 新增 `nameMatch.ts`，支援異體字 / 形近同音字 / 缺字多字 / 顛倒字與高、中、低信心分級 | 已補單元測試，接入校對流程 |
-| 修正建議 | 已完成 | 可依班級 + 座號找到正確姓名，也可依姓名提示疑似學生 | 中文姓名校正引擎會標示建議信心與原因 |
-| 批次校正 | 已完成但降為輔助 | 可單列套用建議或一鍵套用全部建議 | 新產品方向不以產生修正版文件為主線 |
-| 結果下載 | 已完成但降為輔助 | 匯出校對結果 Excel | 正式工作流優先在前端直接回報問題，不要求老師下載再處理 |
-| 建置版本標記 | 已完成 | `scripts/finalize-build.mjs` 自動寫入 app 版本、`sw.js` 版本與 `version.json` | 用於 PWA 更新通知與快取破壞 |
-| 建置 git 強化 | 已完成 | finalize-build 取版號的 git 呼叫加上 `safe.directory` 與明確 stdio | 避免 CI / 不同擁有者目錄下 git 報 dubious ownership 而拿不到 SHA |
-| 文件 | 已完成 | 補 README、進度表、未來優化建議 | 供後續開發追蹤 |
-| 驗證 | 已完成 | `npm run lint`、`npm run build`、匯入器單元測試、Playwright 畫面檢查通過 | 桌機與手機版皆已檢查 |
+### 前端 / UI
 
-## 已知限制
+| 模組 | 狀態 | 完成內容 | 備註 |
+|---|---|---|---|
+| 專案骨架 | ✅ 已完成 | Vite + React + TypeScript 前端專案 | `npm run dev` 啟動 |
+| 基礎 UI | ✅ 已完成 | 學生名單校對平台主畫面，支援桌機與手機版 | — |
+| 校對結果回報頁 | ✅ 已完成 | 整份名單狀態 + 需確認問題清單，不再以修正版下載為主線 | — |
+| 名單上傳 | ✅ 已完成 | 支援 `.xlsx`、`.xls`、`.csv`、`.pdf`、`.docx`、`.doc` | — |
+| PDF 名單解析（文字型） | ✅ 已完成 | 抽取文字層、保留頁碼、依寬度切分多欄版面 | `src/lib/importer/pdf.ts` |
+| PDF 影像 OCR（前端） | ✅ 已完成 | 文字層為空時，用 tesseract.js（chi_tra+eng）對頁面影像辨識；動態載入、附逐頁進度與離線後援 | `src/lib/importer/ocr.ts` |
+| Word 名單解析 | ✅ 已完成 | `.docx` 表格（含合併儲存格還原）與段落 / 條列名單 | `src/lib/importer/word.ts` |
+| 舊版 .doc 後援 | ✅ 已完成 | best-effort 從 `.doc` 二進位還原文字（UTF-16LE、儲存格標記） | 失敗時提示轉 Excel / CSV |
+| 來源位置標註 | ✅ 已完成 | 校對結果顯示「來源」欄（PDF 頁碼 / Word 段落） | — |
+| 統一匯入管線 | ✅ 已完成 | Excel / CSV / PDF / Word 共用同一套解析、欄位偵測、信心評分 | `src/lib/importer/importRoster.ts` |
+| 匯入診斷 | ✅ 已完成 | 偵測表格、欄位對應、信心分數；失敗時提供診斷訊息可複製 | `src/lib/importer/diagnostics.ts` |
+| 欄位辨識 | ✅ 已完成 | 自動偵測班級、座號、姓名欄位並計算偵測信心，可手動調整 | — |
+| 無標題列韌性 | ✅ 已完成 | 無欄名檔案不吃掉第一位學生，整份視為資料並推測欄位 | `resolveHeader` |
+| 記住欄位對應 | ✅ 已完成 | 以表頭簽章記住老師手動調整，同結構檔案自動套用 | `src/lib/importer/columnMemory.ts` |
+| 標題列逃生口 | ✅ 已完成 | 可手動重指定標題列或標記無標題列，附每列預覽下拉 | — |
+| OCR 進度 UI（前端） | ✅ 已補強 | `OcrJobProgress` 加入等待秒數計時、超過 180 秒顯示超時提示（amber）、失敗或超時後顯示「重新上傳其他檔案」按鈕 | — |
+| 修正版 Word 輸出 | ✅ 已完成（輔助） | 一鍵輸出校對後名單成 `.docx` | `src/lib/importer/exportWord.ts` |
+| 批次校正 | ✅ 已完成（輔助） | 單列套用建議或一鍵全部套用 | 非主線流程 |
+| 結果下載 | ✅ 已完成（輔助） | 匯出校對結果 Excel | 非主線流程 |
+| PWA / 版本更新 | ✅ 已完成 | Service Worker + 版本標記，有新版時自動提示更新 | `scripts/finalize-build.mjs` |
+
+### 後端 / Firebase
+
+| 模組 | 狀態 | 完成內容 | 備註 |
+|---|---|---|---|
+| Firebase SDK | ✅ 已完成 | 初始化、Google 登入、Firestore 讀寫；未設定 env 退回示範模式 | — |
+| Firestore 資料模型 | ✅ 已完成 | `students`、`studentDatabaseMeta`、`admins`、`validations`、`ocrJobs` | 詳見 `FIREBASE_SETUP.md` |
+| Firestore 安全規則 | ✅ 已完成 | 預設拒絕；`admins/{uid}` 可讀寫學生資料 | 需部署至 Firebase project |
+| Storage 安全規則 | ✅ 已完成 | 前端預設不能讀寫 Storage；OCR PDF 只由 Functions Admin SDK 處理 | — |
+| Firebase Functions 骨架 | ✅ 已完成 | `validateRosterRows`、`validateRosterFile`、`createOcrJob`、`processOcrJob` | 尚待部署 |
+| 後端檔案校對 | ✅ 已完成 | `.xlsx` / `.csv` / `.docx` / 文字型 PDF 後端解析與比對 | 尚待部署 |
+| 後端 OCR 背景工作 | ✅ 已完成第二版 | `createOcrJob` 暫存 PDF 至 Storage；`processOcrJob` 先試文字抽取，為空時自動切換 tesseract.js（`chi_tra+eng`，語言資料打包進 `functions/lang/`）；進度訊息細化至 25%→75%→100% | 尚待部署 |
+| 校對紀錄 | ✅ 已完成 | 後端校對寫入 `validations` 摘要（不保存原始檔或完整名單） | 尚待部署 |
+| OCR Job 即時追蹤 | ✅ 已完成 | 前端監聽 `ocrJobs/{jobId}` Firestore snapshot，即時更新進度 | — |
+| 學生資料庫種子 | ✅ 已完成 | 795 位學生，公開版已匿名化 | `src/data/students.json` |
+| 學生資料庫更新 | ✅ 已完成 | 前端上傳 `.xls` 更新本機資料庫；admin 可推至 Firebase | — |
+| 資料庫匯入腳本 | ✅ 已完成 | `scripts/import-students.mjs` | `npm run import:students` |
+| GitHub Actions 串接 | ✅ 已完成 | 接收 `VITE_FIREBASE_*` secrets | 尚待填入正式 Firebase config |
+
+### 校對引擎
+
+| 模組 | 狀態 | 完成內容 |
+|---|---|---|
+| 班級正規化 | ✅ 已完成 | 中文數字、年班格式、天干班碼統一轉三碼（如 `102`） |
+| 座號正規化 | ✅ 已完成 | 補零、過濾非數字、範圍合理性 |
+| 中文姓名校正引擎 | ✅ 已完成 | 異體字、形近同音字、缺字多字、顛倒字；高 / 中 / 低信心分級；含單元測試 |
+| 模糊比對流程 | ✅ 已完成 | 精確→班+座→同名→全庫模糊，逐層回退 |
+| 修正建議 | ✅ 已完成 | 依班+座找正確姓名；依姓名找疑似學生；標示信心與原因 |
+
+---
+
+## 已知限制與待辦
 
 | 項目 | 狀態 | 說明 |
 |---|---|---|
-| PDF / Word 解析 | 已完成 | 文字型 PDF（含頁碼 / 多欄）、掃描 PDF OCR、`.docx`（含合併儲存格）/ 段落、舊版 `.doc` best-effort 皆已支援 |
-| .doc / OCR 辨識品質 | 需留意 | `.doc` 為 best-effort 文字還原、OCR 需下載語言資料且對低品質掃描準確度有限，建議優先轉成 Excel / CSV |
-| 正式登入權限 | 尚未實作 | 目前是單機前端工具，尚無教師 / 行政角色登入 |
-| 正式後端資料庫 | 部分完成 | 已加入 Firebase / Firestore / Functions 架構，尚待建立 Firebase project、secrets 與部署 |
-| 操作紀錄 | 部分完成 | 後端校對已保存上傳者、檔名、摘要、問題數與問題預覽 | 下載紀錄與任務流程尚未實作 |
-| 產品主線 | 已重新對齊 | 正式版應以「後端辨識與比對、前端回報是否正確」為主，不以修正版下載為核心；前端第一版回報頁已落地 |
-| Excel 解析安全性 | 需改善 | 目前使用 `xlsx`，`npm audit` 顯示套件有 high severity 且暫無官方修補版 |
-| 大量名單效能 | 未壓測 | 第一版足以處理一般班級 / 活動名單，尚未針對全校大量檔案做效能測試 |
+| Firebase 正式部署 | ⏳ 待辦 | 需學校 Firebase project、secrets 與 `--account=ipad@mail2.smes.tyc.edu.tw` 部署 |
+| OCR 辨識品質 | 需留意 | tesseract.js 對低品質掃描或手寫字準確度有限；建議優先用 Excel / CSV |
+| 正式登入與角色權限 | ⏳ 未實作 | 目前單機前端工具，尚無教師 / 行政 / admin 角色區分 |
+| 操作紀錄完整性 | 部分完成 | 後端校對已保存摘要；下載紀錄與任務流程尚未實作 |
+| Excel 解析安全性 | 需改善 | 前端使用 `xlsx` 套件有 high severity audit 警告，暫無官方修補版 |
+| `.xls` 後端解析 | ⏳ 未實作 | 後端目前僅支援 `.xlsx`，舊版 `.xls` 仍走前端 |
+| Storage TTL 清理 | ⏳ 未實作 | OCR 暫存 PDF 應設 GCS lifecycle rule 自動清理（建議 1 天） |
+| 大量名單效能 | 未壓測 | 第一版足以處理一般班級名單；全校大量上傳尚未壓測 |
 
-## 下一階段建議優先順序
+---
 
-| 優先 | 工作項目 | 原因 |
-|---|---|---|
-| P0 | 將 Excel 解析移到後端或替換安全套件 | `.xlsx` / `.csv` 後端解析第一版已完成，仍需部署與擴充 `.xls` / PDF / OCR |
-| P0 | 建立正式後端 API 與資料庫 | 後端負責辨識、比對與回傳校對結果，前端只呈現是否正確與問題清單 |
-| P0 | 後端化檔案辨識 | `.xlsx` / `.csv` / `.docx` / 文字型 PDF 已可走 Functions 後端；掃描 PDF OCR 已建立 Storage job 與 worker 管線，下一步接入影像 OCR 引擎 |
-| P1 | 擴充中文姓名校正字典 | 第一版已支援常見異體 / 形近 / 同音，後續可依石門國小實際名冊誤植回饋擴充 |
-| P1 | 增加登入與角色權限 | 區分老師、行政、系統管理員 |
-| P1 | 增加校對紀錄與下載紀錄 | 行政流程需要追蹤責任與版本 |
-| P1 | 強化錯誤分類與報表 | 讓行政人員快速知道錯在哪裡 |
-| P2 | 校正 OCR 辨識結果（中文字典修正、表格框線偵測） | OCR 後援已可用，準確度仍可再提升 |
-| P3 | 建立獎狀 / 報名表輸出模板 | 不是目前主線；先把上傳後自動檢查與問題回報做好 |
+## 未來優化改良與可開發功能建議
+
+詳見下方 `ROADMAP.md` 或本文件末尾的建議清單。
