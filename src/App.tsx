@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
   FileSpreadsheet,
+  Lock,
+  LogIn,
+  LogOut,
   RefreshCw,
   Upload,
   XCircle,
@@ -62,6 +65,8 @@ function App() {
   const [message, setMessage] = useState('')
   const [updateReady, setUpdateReady] = useState(false)
   const [ocrElapsedSeconds, setOcrElapsedSeconds] = useState(0)
+  const [showAdminPanel, setShowAdminPanel] = useState(false)
+  const adminPanelRef = useRef<HTMLDivElement>(null)
 
   const hasData = rows.length > 0 || backendReport !== null || activeOcrJob !== null
 
@@ -109,6 +114,18 @@ function App() {
       if (job.message) setMessage(job.message)
     })
   }, [activeOcrJob?.jobId, activeOcrJob?.status])
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (adminPanelRef.current && !adminPanelRef.current.contains(event.target as Node)) {
+        setShowAdminPanel(false)
+      }
+    }
+    if (showAdminPanel) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showAdminPanel])
 
   const results = useMemo(() => rows.map((row) => validateRow(row, students)), [rows, students])
   const issueResults = useMemo(() => results.filter((result) => result.status !== 'pass'), [results])
@@ -352,19 +369,6 @@ function App() {
           </p>
         </div>
         <div className="topbar-actions">
-          {firebaseReady ? (
-            userEmail ? (
-              <button type="button" className="ghost-button" onClick={handleSignOut}>
-                登出
-              </button>
-            ) : (
-              <button type="button" className="ghost-button" onClick={handleSignIn}>
-                教師登入
-              </button>
-            )
-          ) : (
-            <span className="firebase-note">Firebase 尚未設定</span>
-          )}
           {canUpdateDatabase ? (
             <label className="ghost-button">
               <Upload size={16} />
@@ -529,6 +533,44 @@ function App() {
           阿凱老師
         </a>
       </footer>
+
+      <div className="admin-entry" ref={adminPanelRef}>
+        {showAdminPanel && (
+          <div className="admin-panel" role="dialog" aria-label="管理員登入">
+            {!firebaseReady ? (
+              <p className="admin-panel__note">Firebase 尚未設定，請先完成 Firebase 環境設定。</p>
+            ) : userEmail ? (
+              <>
+                <p className="admin-panel__account">
+                  {isAdmin ? '👑 管理員' : '教師'}<br />
+                  <span>{userEmail}</span>
+                </p>
+                <button type="button" className="admin-panel__btn" onClick={() => { void handleSignOut(); setShowAdminPanel(false) }}>
+                  <LogOut size={15} />
+                  登出
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="admin-panel__note">以管理員 Google 帳號登入，解鎖資料庫更新功能。</p>
+                <button type="button" className="admin-panel__btn admin-panel__btn--primary" onClick={() => { void handleSignIn(); setShowAdminPanel(false) }}>
+                  <LogIn size={15} />
+                  Google 登入
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        <button
+          type="button"
+          className={`admin-trigger${userEmail ? ' admin-trigger--active' : ''}`}
+          onClick={() => setShowAdminPanel((prev) => !prev)}
+          aria-label="管理員入口"
+          title={userEmail ? `已登入：${userEmail}` : '管理員登入'}
+        >
+          <Lock size={14} />
+        </button>
+      </div>
     </main>
   )
 }
