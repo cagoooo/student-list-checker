@@ -2,8 +2,9 @@ import { initializeApp, type FirebaseApp } from 'firebase/app'
 import {
   GoogleAuthProvider,
   getAuth,
+  getRedirectResult,
   onAuthStateChanged,
-  signInWithPopup,
+  signInWithRedirect,
   signOut,
   type User,
 } from 'firebase/auth'
@@ -78,7 +79,17 @@ export async function signInWithGoogle() {
 
   const provider = new GoogleAuthProvider()
   provider.setCustomParameters({ hd: 'mail2.smes.tyc.edu.tw', prompt: 'select_account' })
-  return signInWithPopup(getAuth(currentRuntime.app), provider)
+  return signInWithRedirect(getAuth(currentRuntime.app), provider)
+}
+
+export async function getGoogleRedirectResult() {
+  const currentRuntime = getFirebaseRuntime()
+  if (!currentRuntime) return null
+  try {
+    return await getRedirectResult(getAuth(currentRuntime.app))
+  } catch {
+    return null
+  }
 }
 
 export async function signOutFirebase() {

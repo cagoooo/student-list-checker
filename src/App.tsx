@@ -24,6 +24,7 @@ import {
 } from './lib/backendValidation'
 import {
   checkIsAdmin,
+  getGoogleRedirectResult,
   isFirebaseEnabled,
   loadFirebaseStudents,
   saveFirebaseStudents,
@@ -161,6 +162,11 @@ function App() {
     const interval = setInterval(() => setOcrElapsedSeconds((prev) => prev + 1), 1000)
     return () => clearInterval(interval)
   }, [isOcrJobPending])
+
+  useEffect(() => {
+    if (!firebaseReady) return
+    void getGoogleRedirectResult()
+  }, [firebaseReady])
 
   useEffect(() => {
     if (!firebaseReady) return undefined
