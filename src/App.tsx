@@ -4,11 +4,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
-  Download,
   FileSpreadsheet,
   RefreshCw,
   Upload,
-  Wand2,
   XCircle,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -29,11 +27,9 @@ import {
   importRosterFile,
   selectCandidateTable as selectImportCandidateTable,
 } from './lib/importer/importRoster'
-import { buildCorrectedWordBlob } from './lib/importer/exportWord'
 import { recallColumnMap, rememberColumnMap } from './lib/importer/columnMemory'
 import { compareChineseNames, findBestNameMatch } from './lib/importer/nameMatch'
 import {
-  applyStudentToRaw,
   buildImportedRows,
   hydrateRow,
   normalizeClass,
@@ -54,6 +50,7 @@ const SAMPLE_ROWS = [
   { 班級: '102', 座號: '5', 姓名: '示範學生031', 項目: '服務獎' },
   { 班級: '6年6班', 座號: '26', 姓名: '不存在', 項目: '美術獎' },
 ]
+const SAMPLE_COLUMN_MAP = detectColumns(Object.keys(SAMPLE_ROWS[0]))
 
 function App() {
   const firebaseReady = isFirebaseEnabled()
@@ -62,11 +59,11 @@ function App() {
   const [userEmail, setUserEmail] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
   const [fileName, setFileName] = useState('範例名單.xlsx')
-  const [rows, setRows] = useState<ImportedRow[]>(() => buildImportedRows(SAMPLE_ROWS))
-  const [columnMap, setColumnMap] = useState<ColumnMap>(() => detectColumns(Object.keys(SAMPLE_ROWS[0])))
+  const [rows, setRows] = useState<ImportedRow[]>(() => buildImportedRows(SAMPLE_ROWS, SAMPLE_COLUMN_MAP))
+  const [columnMap, setColumnMap] = useState<ColumnMap>(() => SAMPLE_COLUMN_MAP)
   const [importDetection, setImportDetection] = useState<ImportDetectionResult | null>(null)
   const [message, setMessage] = useState(
-    `已載入 ${DEFAULT_STUDENTS.length} 位學生資料，可直接測試校對與修正流程。`,
+    `已載入 ${DEFAULT_STUDENTS.length} 位學生資料，可直接測試名單檢查流程。`,
   )
   const [updateReady, setUpdateReady] = useState(false)
 
@@ -76,7 +73,9 @@ function App() {
 
   const headers = useMemo(() => collectHeaders(rows), [rows])
   const results = useMemo(() => rows.map((row) => validateRow(row, students)), [rows, students])
+  const issueResults = useMemo(() => results.filter((result) => result.status !== 'pass'), [results])
   const stats = useMemo(() => summarize(results), [results])
+  const reportTone = stats.error > 0 ? 'danger' : stats.warning > 0 ? 'warning' : 'success'
   // Firebase 已設定時，必須具備 admin 權限才能更新資料庫；未設定 Firebase 才保留本機模式。
   const canUpdateDatabase = !firebaseReady || isAdmin
 
@@ -253,83 +252,6 @@ function App() {
     }
   }
 
-  function applySuggestion(result: ValidationResult) {
-    if (!result.suggestion) return
-    setRows((current) =>
-      current.map((row) => {
-        if (row.id !== result.id || !result.suggestion) return row
-        const raw = applyStudentToRaw(row.raw, result.suggestion, columnMap)
-        return hydrateRow(raw, row.rowNo, columnMap)
-      }),
-    )
-  }
-
-  function applyAllSuggestions() {
-    setRows((current) =>
-      current.map((row) => {
-        const result = validateRow(row, students)
-        if (!result.suggestion || result.status === 'pass') return row
-        const raw = applyStudentToRaw(row.raw, result.suggestion, columnMap)
-        return hydrateRow(raw, row.rowNo, columnMap)
-      }),
-    )
-  }
-
-  function downloadCorrected() {
-    const output = results.map((result) => {
-      const corrected = result.suggestion ?? {
-        className: result.classValue,
-        seatNo: result.seatNo,
-        name: result.name,
-      }
-
-      return {
-        ...result.raw,
-        校對狀態: statusLabel(result.status),
-        錯誤提示: result.issue,
-        建議班級: corrected.className,
-        建議座號: corrected.seatNo,
-        建議姓名: corrected.name,
-        信心分數: result.confidence,
-      }
-    })
-
-    const worksheet = XLSX.utils.json_to_sheet(output)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, '校對結果')
-    XLSX.writeFile(workbook, `${stripExtension(fileName)}-校對結果.xlsx`)
-  }
-
-  async function downloadCorrectedWord() {
-    const entries = results.map((result) => {
-      const corrected = result.suggestion ?? {
-        className: result.classValue,
-        seatNo: result.seatNo,
-        name: result.name,
-      }
-      return {
-        status: statusLabel(result.status),
-        sourceLabel: result.sourceLabel,
-        className: corrected.className,
-        seatNo: corrected.seatNo,
-        name: corrected.name,
-        issue: result.issue,
-      }
-    })
-
-    try {
-      const blob = await buildCorrectedWordBlob(`${stripExtension(fileName)} 校對結果`, entries)
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${stripExtension(fileName)}-校對結果.docx`
-      link.click()
-      URL.revokeObjectURL(url)
-    } catch {
-      setMessage('產生修正版 Word 失敗，請改用下載校對結果（Excel）。')
-    }
-  }
-
   function downloadSample() {
     const worksheet = XLSX.utils.json_to_sheet(SAMPLE_ROWS)
     const workbook = XLSX.utils.book_new()
@@ -392,7 +314,7 @@ function App() {
       <section className="summary-band">
         <div className="summary-copy">
           <span className="file-pill">{fileName}</span>
-          <h2>自動比對班級、座號與姓名</h2>
+          <h2>上傳後自動檢查名單是否正確</h2>
           <p>{message}</p>
           <p className="source-note">
             資料庫來源：{databaseModeLabel(databaseMode)}，目前載入 {students.length} 位學生
@@ -480,32 +402,30 @@ function App() {
               <RefreshCw size={18} />
               還原內建資料庫
             </button>
-            <button type="button" className="primary-button wide" onClick={applyAllSuggestions}>
-              <Wand2 size={18} />
-              套用全部建議
-            </button>
-            <button type="button" className="ghost-button wide" onClick={downloadCorrected}>
-              <Download size={18} />
-              下載校對結果
-            </button>
-            <button type="button" className="ghost-button wide" onClick={downloadCorrectedWord}>
-              <Download size={18} />
-              下載修正版 Word
-            </button>
           </div>
         </aside>
 
         <section className="table-panel">
+          <div className={`report-card report-${reportTone}`} role="status">
+            <div className="report-icon">
+              {reportTone === 'success' ? <CheckCircle2 size={28} /> : <AlertTriangle size={28} />}
+            </div>
+            <div>
+              <h2>{reportTitle(stats)}</h2>
+              <p>{reportDescription(stats, issueResults.length)}</p>
+            </div>
+          </div>
           <div className="table-toolbar">
             <div>
-              <h2>校對結果</h2>
-              <p>系統不會直接覆蓋原始檔，需由行政人員確認後再下載修正版。</p>
+              <h2>需要老師確認的項目</h2>
+              <p>只列出可能有問題的學生；老師依提示回原始檔修正即可。</p>
             </div>
             <button
               type="button"
               className="ghost-button"
               onClick={() => {
-                setRows(buildImportedRows(SAMPLE_ROWS, columnMap))
+                setRows(buildImportedRows(SAMPLE_ROWS, SAMPLE_COLUMN_MAP))
+                setColumnMap(SAMPLE_COLUMN_MAP)
                 setImportDetection(null)
                 setFileName('範例名單.xlsx')
               }}
@@ -515,59 +435,57 @@ function App() {
             </button>
           </div>
 
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>狀態</th>
-                  <th>列號</th>
-                  <th>來源</th>
-                  <th>原始班級</th>
-                  <th>原始座號</th>
-                  <th>原始姓名</th>
-                  <th>提示</th>
-                  <th>建議修正</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((result) => (
-                  <tr key={result.id} className={`row-${result.status}`}>
-                    <td>
-                      <StatusBadge status={result.status} />
-                    </td>
-                    <td>{result.rowNo}</td>
-                    <td>{result.sourceLabel || '—'}</td>
-                    <td>{result.classValue || '未填'}</td>
-                    <td>{result.seatNo || '未填'}</td>
-                    <td>{result.name || '未填'}</td>
-                    <td>{result.issue}</td>
-                    <td>
-                      {result.suggestion ? (
-                        <span className="suggestion">
-                          {result.suggestion.className} {result.suggestion.seatNo}號{' '}
-                          {result.suggestion.name}
-                        </span>
-                      ) : (
-                        <span className="muted">無</span>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="mini-button"
-                        disabled={!result.suggestion || result.status === 'pass'}
-                        onClick={() => applySuggestion(result)}
-                        title="套用這一列的建議"
-                      >
-                        <Wand2 size={16} />
-                      </button>
-                    </td>
+          {issueResults.length === 0 ? (
+            <div className="empty-report">
+              <CheckCircle2 size={42} />
+              <strong>目前沒有發現姓名或班級座號問題</strong>
+              <span>這份名單共 {results.length} 筆，系統比對結果皆為通過。</span>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>狀態</th>
+                    <th>列號</th>
+                    <th>來源</th>
+                    <th>原始班級</th>
+                    <th>原始座號</th>
+                    <th>原始姓名</th>
+                    <th>提示</th>
+                    <th>系統比對到的資料</th>
+                    <th>信心</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {issueResults.map((result) => (
+                    <tr key={result.id} className={`row-${result.status}`}>
+                      <td>
+                        <StatusBadge status={result.status} />
+                      </td>
+                      <td>{result.rowNo}</td>
+                      <td>{result.sourceLabel || '—'}</td>
+                      <td>{result.classValue || '未填'}</td>
+                      <td>{result.seatNo || '未填'}</td>
+                      <td>{result.name || '未填'}</td>
+                      <td>{result.issue}</td>
+                      <td>
+                        {result.suggestion ? (
+                          <span className="suggestion">
+                            {result.suggestion.className} {result.suggestion.seatNo}號{' '}
+                            {result.suggestion.name}
+                          </span>
+                        ) : (
+                          <span className="muted">無</span>
+                        )}
+                      </td>
+                      <td>{result.confidence}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       </section>
 
@@ -840,6 +758,22 @@ function summarize(results: ValidationResult[]) {
   )
 }
 
+function reportTitle(stats: Record<ValidationStatus, number>) {
+  if (stats.error > 0) return '這份名單有需要修正的資料'
+  if (stats.warning > 0) return '這份名單有幾筆需要老師確認'
+  return '這份名單目前全部比對正確'
+}
+
+function reportDescription(stats: Record<ValidationStatus, number>, issueCount: number) {
+  if (stats.error > 0) {
+    return `發現 ${stats.error} 筆錯誤、${stats.warning} 筆待確認。下方只列出 ${issueCount} 筆需要回原檔確認的項目。`
+  }
+  if (stats.warning > 0) {
+    return `沒有明確錯誤，但有 ${stats.warning} 筆姓名或位置需要人工看一下。`
+  }
+  return `共 ${stats.pass} 筆資料通過比對，沒有發現姓名 KEY 錯或班級座號不符。`
+}
+
 function nameMatchLabel(level: 'high' | 'medium' | 'low') {
   return {
     high: '高信心建議',
@@ -862,10 +796,6 @@ function databaseModeLabel(mode: DatabaseMode) {
     local: '瀏覽器本機資料',
     firebase: 'Firebase 雲端資料庫',
   }[mode]
-}
-
-function stripExtension(name: string) {
-  return name.replace(/\.[^.]+$/, '')
 }
 
 export default App

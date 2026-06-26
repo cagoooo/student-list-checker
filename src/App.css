@@ -370,6 +370,61 @@ h2 {
   overflow: hidden;
 }
 
+.report-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid #d9e0e8;
+}
+
+.report-card h2 {
+  margin-bottom: 6px;
+}
+
+.report-card p {
+  color: #526071;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.report-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+}
+
+.report-success {
+  background: #eefaf4;
+}
+
+.report-success .report-icon {
+  color: #1d704d;
+  background: #d5f1e2;
+}
+
+.report-warning {
+  background: #fff9eb;
+}
+
+.report-warning .report-icon {
+  color: #8a5a08;
+  background: #ffe9ae;
+}
+
+.report-danger {
+  background: #fff5f4;
+}
+
+.report-danger .report-icon {
+  color: #9b2c24;
+  background: #ffe2df;
+}
+
 .table-toolbar {
   justify-content: space-between;
   padding: 20px;
@@ -385,6 +440,25 @@ h2 {
   max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.empty-report {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 48px 20px;
+  color: #1d704d;
+  text-align: center;
+}
+
+.empty-report strong {
+  color: #111827;
+  font-size: 18px;
+}
+
+.empty-report span {
+  color: #637083;
+  font-size: 15px;
 }
 
 table {
