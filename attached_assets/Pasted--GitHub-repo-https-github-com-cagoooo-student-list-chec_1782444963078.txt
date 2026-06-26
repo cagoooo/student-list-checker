@@ -1,0 +1,94 @@
+請接手 GitHub repo：
+
+https://github.com/cagoooo/student-list-checker
+本地專案路徑：H:\Refine
+Firebase 專案：mbti-classroom-smes
+管理員帳號：ipad@mail2.smes.tyc.edu.tw
+
+重要規則：
+- 回報使用繁體中文。
+- 學校是「桃園市龍潭區石門國民小學」，簡稱「石門國小」，不要寫成新明。
+- GitHub repo 使用 cagoooo/student-list-checker。
+- Firebase / GCP 操作請使用 ipad@mail2.smes.tyc.edu.tw。
+- 不需要部署 hosting，除非我另外指定。
+
+目前狀態：
+1. repo 已同步到 main，最新已 push。
+2. Firebase 專案已升級 Blaze。
+3. Firebase Storage default bucket 已建立：
+   - bucket: mbti-classroom-smes.firebasestorage.app
+   - location: ASIA-EAST1
+   - storageClass: STANDARD
+4. Gen 2 Functions 需要的 IAM bindings 已補上。
+5. Firestore rules / indexes 已部署成功。
+6. Storage rules 已部署成功。
+7. Functions 已部署成功，region 全部是 asia-east1，runtime nodejs22。
+
+已部署 Functions：
+- createOcrJob
+  https://asia-east1-mbti-classroom-smes.cloudfunctions.net/createOcrJob
+  callable
+
+- validateRosterFile
+  https://asia-east1-mbti-classroom-smes.cloudfunctions.net/validateRosterFile
+  callable
+
+- validateRosterRows
+  https://asia-east1-mbti-classroom-smes.cloudfunctions.net/validateRosterRows
+  callable
+
+- processOcrJob
+  https://asia-east1-mbti-classroom-smes.cloudfunctions.net/processOcrJob
+  Storage trigger，不是前端直接呼叫的 callable endpoint。
+  監聽 bucket: mbti-classroom-smes.firebasestorage.app
+
+管理員 Firebase UID：
+O3YZo2g8J3NlV9RJGQFIdsDU8Uo1
+
+Firestore admin 文件已存在：
+admins/O3YZo2g8J3NlV9RJGQFIdsDU8Uo1
+欄位包含：
+- email: ipad@mail2.smes.tyc.edu.tw
+- role: owner
+- note: student-list-checker admin (akai)
+- createdAt: 已補 server timestamp
+
+Codex 這邊做過的修正：
+- Replit 帶回的 package-lock 裡有 package-firewall.replit.local，已改成 registry.npmjs.org。
+- 已 commit + push：
+  feb37fb Fix npm registry URLs in lockfiles
+
+請先執行：
+git pull origin main
+npm install
+npm --prefix functions install
+npm --prefix functions run build
+
+若需要重新部署 Firebase：
+firebase --account=ipad@mail2.smes.tyc.edu.tw deploy --only "functions,firestore:rules,firestore:indexes,storage" --project mbti-classroom-smes --force
+
+目前不需要處理：
+- 不需要再建立 Storage bucket。
+- 不需要再補 IAM。
+- 不需要再建立 admins 文件。
+- 不需要部署 hosting。
+
+接下來建議接手任務：
+1. 驗證前端是否正確呼叫 asia-east1 callable functions。
+2. 測試登入 ipad@mail2.smes.tyc.edu.tw 後是否取得 admin 權限。
+3. 測試名單檔案上傳：
+   - validateRosterRows
+   - validateRosterFile
+   - createOcrJob
+   - Storage trigger processOcrJob
+4. 若前端目前還引用舊名稱如 ocrPdf / processTeacherFile，請改接目前實際部署的 functions：
+   - createOcrJob
+   - validateRosterFile
+   - validateRosterRows
+5. 若 OCR job 有問題，優先檢查：
+   - functions/src/index.ts
+   - Storage path: ocr-jobs/{uid}/{jobId}/source.pdf
+   - Firestore collection: ocrJobs
+   - Firestore collection: validations
+
+請保持小步 commit，完成可運作修正後直接 commit + push 到 main。
