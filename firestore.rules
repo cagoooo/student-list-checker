@@ -44,6 +44,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /ocrJobs/{jobId} {
+      allow read: if isSchoolAccount()
+        && (resource.data.createdByUid == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

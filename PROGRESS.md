@@ -31,6 +31,7 @@
 | Firebase SDK | 已完成 | 已加入 Firebase 初始化、Google 登入、Firestore 讀寫服務 | 未設定 env 時會退回匿名示範模式 |
 | Firebase Functions | 已完成第一版 | 新增 `validateRosterRows` / `validateRosterFile` 後端函式，支援後端校對與 `.xlsx` / `.csv` / `.docx` / 文字型 PDF 後端解析 | 尚待部署至正式 Firebase project |
 | 校對紀錄 | 已完成第一版 | 後端校對會寫入 `validations` 摘要紀錄，前端顯示紀錄編號 | 不保存原始檔或完整名單 |
+| OCR 背景工作 | 已完成骨架 | 新增 `createOcrJob` 與 `ocrJobs` 規則，掃描 PDF 可建立背景辨識工作紀錄 | OCR worker / 引擎尚待接入 |
 | Firestore 資料模型 | 已完成 | 已定義 `students`、`studentDatabaseMeta`、`admins` | 詳見 `FIREBASE_SETUP.md` |
 | Firestore 安全規則 | 已完成 | 預設拒絕；僅 `admins/{uid}` 可讀寫學生資料 | 需部署到 Firebase project |
 | GitHub Secrets 串接 | 已完成 | GitHub Actions 已可接收 `VITE_FIREBASE_*` secrets | 尚待填入正式 Firebase Web App config |
@@ -64,7 +65,7 @@
 |---|---|---|
 | P0 | 將 Excel 解析移到後端或替換安全套件 | `.xlsx` / `.csv` 後端解析第一版已完成，仍需部署與擴充 `.xls` / PDF / OCR |
 | P0 | 建立正式後端 API 與資料庫 | 後端負責辨識、比對與回傳校對結果，前端只呈現是否正確與問題清單 |
-| P0 | 後端化檔案辨識 | `.xlsx` / `.csv` / `.docx` / 文字型 PDF 已可走 Functions 後端；掃描 PDF OCR 仍需另行設計 |
+| P0 | 後端化檔案辨識 | `.xlsx` / `.csv` / `.docx` / 文字型 PDF 已可走 Functions 後端；掃描 PDF OCR 已建立 job 骨架，worker 尚待接入 |
 | P1 | 擴充中文姓名校正字典 | 第一版已支援常見異體 / 形近 / 同音，後續可依石門國小實際名冊誤植回饋擴充 |
 | P1 | 增加登入與角色權限 | 區分老師、行政、系統管理員 |
 | P1 | 增加校對紀錄與下載紀錄 | 行政流程需要追蹤責任與版本 |

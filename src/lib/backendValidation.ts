@@ -47,6 +47,12 @@ export type BackendFileValidationReport = BackendValidationReport & {
   }
 }
 
+export type BackendOcrJob = {
+  jobId: string
+  status: 'queued'
+  message: string
+}
+
 export async function validateRosterRowsOnBackend(rows: BackendRosterRow[]) {
   const runtime = getFirebaseRuntime()
   if (!runtime) return null
@@ -74,6 +80,21 @@ export async function validateRosterFileOnBackend(file: File) {
 
   const contentBase64 = await fileToBase64(file)
   const result = await validateRosterFile({ fileName: file.name, contentBase64 })
+  return result.data
+}
+
+export async function createOcrJobOnBackend(file: File) {
+  const runtime = getFirebaseRuntime()
+  if (!runtime) return null
+
+  const region = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'asia-east1'
+  const functions = getFunctions(runtime.app, region)
+  const createOcrJob = httpsCallable<{ fileName: string; contentBase64: string }, BackendOcrJob>(
+    functions,
+    'createOcrJob',
+  )
+  const contentBase64 = await fileToBase64(file)
+  const result = await createOcrJob({ fileName: file.name, contentBase64 })
   return result.data
 }
 

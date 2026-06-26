@@ -59,6 +59,7 @@ GET  /api/validations/:id
 - 回傳 `summary` / `issues` 給前端結果回報頁 ✅
 - 前端在 Firebase 登入後優先呼叫後端檔案解析 / 校對，失敗時自動回退本機校對 ✅
 - 後端寫入 `validations` 摘要紀錄，前端顯示紀錄編號 ✅
+- 掃描 PDF OCR job 骨架 ✅（`createOcrJob` / `ocrJobs`，worker 尚待接入）
 
 核心回傳資料應包含：
 

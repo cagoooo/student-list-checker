@@ -76,6 +76,17 @@ type FileValidationRequest = {
   contentBase64: string
 }
 
+type OcrJobRequest = {
+  fileName: string
+  contentBase64: string
+}
+
+type OcrJobResponse = {
+  jobId: string
+  status: 'queued'
+  message: string
+}
+
 type Caller = {
   uid: string
   email: string
@@ -181,6 +192,47 @@ export const validateRosterFile = onCall<FileValidationRequest, Promise<FileVali
       confidence: parsed.confidence,
       warnings: parsed.warnings,
     },
+  }
+})
+
+export const createOcrJob = onCall<OcrJobRequest, Promise<OcrJobResponse>>(async (request) => {
+  const caller = assertSchoolCaller(request.auth?.uid, request.auth?.token.email)
+  const fileName = toText(request.data?.fileName)
+  const contentBase64 = toText(request.data?.contentBase64)
+  if (!fileName || !contentBase64) {
+    throw new HttpsError('invalid-argument', '缺少檔名或檔案內容。')
+  }
+  if (!/\.pdf$/i.test(fileName)) {
+    throw new HttpsError('invalid-argument', 'OCR 背景辨識目前只接受 PDF。')
+  }
+  if (contentBase64.length > 14 * 1024 * 1024) {
+    throw new HttpsError('invalid-argument', '掃描檔太大，請先拆成較小 PDF 後再上傳。')
+  }
+
+  const now = Date.now()
+  const expiresAt = new Date(now + 24 * 60 * 60 * 1000)
+  const ref = getFirestore().collection('ocrJobs').doc()
+  await ref.set({
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+    expiresAt,
+    createdByUid: caller.uid,
+    createdByEmail: caller.email,
+    fileName,
+    fileSizeBase64: contentBase64.length,
+    status: 'queued',
+    progress: 0,
+    message: 'OCR 背景辨識工作已建立，等待 worker 接手處理。',
+    resultValidationId: null,
+    errorMessage: null,
+    // 目前先不保存原始檔；正式 OCR worker 需改接短期保存的 Storage 物件或外部文件 AI。
+    inputStored: false,
+  })
+
+  return {
+    jobId: ref.id,
+    status: 'queued',
+    message: 'OCR 背景辨識工作已建立，稍後可用紀錄編號追蹤狀態。',
   }
 })
 

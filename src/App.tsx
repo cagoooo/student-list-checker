@@ -14,6 +14,7 @@ import studentsData from './data/students.json'
 import {
   validateRosterRowsOnBackend,
   validateRosterFileOnBackend,
+  createOcrJobOnBackend,
   type BackendValidationIssue,
   type BackendRosterRow,
   type BackendValidationReport,
@@ -180,6 +181,17 @@ function App() {
             return
           }
         } catch {
+          if (/\.pdf$/i.test(file.name)) {
+            const job = await createOcrJobOnBackend(file)
+            if (job) {
+              setBackendReport(null)
+              setBackendStatus('checking')
+              setImportDetection(null)
+              setFileName(file.name)
+              setMessage(`掃描型 PDF 已建立背景辨識工作：${job.jobId}。${job.message}`)
+              return
+            }
+          }
           setBackendReport(null)
           setBackendStatus('fallback')
           setMessage('後端檔案校對暫不可用，已改用本機辨識流程。')

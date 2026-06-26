@@ -113,6 +113,7 @@ functions/src/index.ts
 ```txt
 validateRosterRows
 validateRosterFile
+createOcrJob
 ```
 
 職責：
@@ -121,6 +122,7 @@ validateRosterFile
 - 從 Firestore `students` collection 讀取正式學生資料庫
 - `validateRosterRows`：接收前端已辨識出的列資料（班級、座號、姓名、來源列號）
 - `validateRosterFile`：接收 `.xlsx` / `.csv` / `.docx` / 文字型 PDF 檔案內容，在後端解析欄位與資料列
+- `createOcrJob`：建立掃描 PDF 的背景 OCR 工作紀錄（worker 尚待接入）
 - 在後端完成學生資料比對與中文姓名模糊校正
 - 回傳 `summary` 與 `issues`，讓前端只呈現整份名單是否正確與問題清單
 - 將校對摘要寫入 Firestore `validations`，方便後續追蹤與除錯
@@ -149,6 +151,7 @@ firebase --account=ipad@mail2.smes.tyc.edu.tw deploy --only functions
 - 管理員且為 `smes.tyc.edu.tw` 或 `mail2.smes.tyc.edu.tw` 帳號：可以更新學生資料
 - 其他未知 collection：全部拒絕
 - `validations`：老師可讀自己的校對紀錄，admin 可讀全部；寫入只允許 Functions 後端
+- `ocrJobs`：老師可讀自己的 OCR 工作，admin 可讀全部；寫入只允許 Functions 後端
 
 ## Firebase 專案建立步驟
 
