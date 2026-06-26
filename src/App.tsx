@@ -3,13 +3,11 @@ import type { ChangeEvent } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
-  Copy,
   FileSpreadsheet,
   RefreshCw,
   Upload,
   XCircle,
 } from 'lucide-react'
-import * as XLSX from 'xlsx'
 import studentsData from './data/students.json'
 import {
   validateRosterRowsOnBackend,
@@ -31,37 +29,23 @@ import {
   subscribeCurrentUser,
 } from './lib/firebase'
 import { detectColumns, parseExcelTables } from './lib/importer/excel'
-import { summarizeImportDiagnostics } from './lib/importer/diagnostics'
-import {
-  applyHeaderRow as applyImportHeaderRow,
-  importRosterFile,
-  selectCandidateTable as selectImportCandidateTable,
-} from './lib/importer/importRoster'
-import { recallColumnMap, rememberColumnMap } from './lib/importer/columnMemory'
+import { importRosterFile } from './lib/importer/importRoster'
+import { recallColumnMap } from './lib/importer/columnMemory'
 import { compareChineseNames, findBestNameMatch } from './lib/importer/nameMatch'
 import {
-  buildImportedRows,
   hydrateRow,
   normalizeClass,
   normalizeName,
   parseStudentsFromTable,
 } from './lib/importer/studentSource'
-import type { CandidateTable, ImportDetectionResult } from './lib/importer/types'
+import type { CandidateTable } from './lib/importer/types'
 import { applyServiceWorkerUpdate, registerServiceWorker } from './lib/registerSW'
-import type { ColumnMap, DatabaseMode, ImportedRow, Student, ValidationResult, ValidationStatus } from './types'
+import type { DatabaseMode, ImportedRow, Student, ValidationResult, ValidationStatus } from './types'
 import './App.css'
 
 const DEFAULT_STUDENTS = studentsData.students as Student[]
 const STUDENT_STORAGE_KEY = 'smes-student-database'
-
-const SAMPLE_ROWS = [
-  { 班級: '1年1班', 座號: '1', 姓名: '示範學生001', 項目: '閱讀獎' },
-  { 班級: '1年1班', 座號: '2', 姓名: '示範學身002', 項目: '閱讀獎' },
-  { 班級: '102', 座號: '5', 姓名: '示範學生031', 項目: '服務獎' },
-  { 班級: '6年6班', 座號: '26', 姓名: '不存在', 項目: '美術獎' },
-]
-const SAMPLE_COLUMN_MAP = detectColumns(Object.keys(SAMPLE_ROWS[0]))
-const BACKEND_COLUMN_MAP: ColumnMap = { classKey: '班級', seatKey: '座號', nameKey: '姓名' }
+const ACCEPTED_FORMATS = '.xlsx,.xls,.csv,.pdf,.doc,.docx'
 
 function App() {
   const firebaseReady = isFirebaseEnabled()
@@ -69,18 +53,17 @@ function App() {
   const [databaseMode, setDatabaseMode] = useState<DatabaseMode>(() => (loadStoredStudents() ? 'local' : 'demo'))
   const [userEmail, setUserEmail] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
-  const [fileName, setFileName] = useState('範例名單.xlsx')
-  const [rows, setRows] = useState<ImportedRow[]>(() => buildImportedRows(SAMPLE_ROWS, SAMPLE_COLUMN_MAP))
-  const [columnMap, setColumnMap] = useState<ColumnMap>(() => SAMPLE_COLUMN_MAP)
-  const [importDetection, setImportDetection] = useState<ImportDetectionResult | null>(null)
+  const [fileName, setFileName] = useState('')
+  const [rows, setRows] = useState<ImportedRow[]>([])
+
   const [backendReport, setBackendReport] = useState<BackendValidationReport | null>(null)
   const [backendStatus, setBackendStatus] = useState<'local' | 'checking' | 'ready' | 'fallback'>('local')
   const [activeOcrJob, setActiveOcrJob] = useState<BackendOcrJobStatus | null>(null)
-  const [message, setMessage] = useState(
-    `已載入 ${DEFAULT_STUDENTS.length} 位學生資料，可直接測試名單檢查流程。`,
-  )
+  const [message, setMessage] = useState('')
   const [updateReady, setUpdateReady] = useState(false)
   const [ocrElapsedSeconds, setOcrElapsedSeconds] = useState(0)
+
+  const hasData = rows.length > 0 || backendReport !== null || activeOcrJob !== null
 
   useEffect(() => {
     registerServiceWorker(() => setUpdateReady(true))
@@ -112,9 +95,7 @@ function App() {
           })
         }
         setBackendStatus('ready')
-        setMessage(
-          `掃描 PDF 背景辨識已完成；校對紀錄編號：${job.resultValidationId ?? job.jobId}。`,
-        )
+        setMessage(`掃描 PDF 背景辨識已完成；校對紀錄編號：${job.resultValidationId ?? job.jobId}。`)
         return
       }
 
@@ -129,7 +110,6 @@ function App() {
     })
   }, [activeOcrJob?.jobId, activeOcrJob?.status])
 
-  const headers = useMemo(() => collectHeaders(rows), [rows])
   const results = useMemo(() => rows.map((row) => validateRow(row, students)), [rows, students])
   const issueResults = useMemo(() => results.filter((result) => result.status !== 'pass'), [results])
   const localStats = useMemo(() => summarize(results), [results])
@@ -153,7 +133,6 @@ function App() {
         : stats.warning > 0
           ? 'warning'
           : 'success'
-  // Firebase 已設定時，必須具備 admin 權限才能更新資料庫；未設定 Firebase 才保留本機模式。
   const canUpdateDatabase = !firebaseReady || isAdmin
 
   useEffect(() => {
@@ -240,13 +219,11 @@ function App() {
           const backend = await validateRosterFileOnBackend(file)
           if (backend) {
             setRows(backend.rows.map(backendRowToImportedRow))
-            setColumnMap(BACKEND_COLUMN_MAP)
-            setImportDetection(null)
             setBackendReport(backend)
             setBackendStatus('ready')
             setFileName(file.name)
             setMessage(
-              `後端已完成 ${file.name} 的辨識與校對，共 ${backend.summary.total} 筆；下方只列出需要確認的項目。`,
+              `後端已完成辨識與校對，共 ${backend.summary.total} 筆；下方只列出需要確認的項目。`,
             )
             return
           }
@@ -256,7 +233,6 @@ function App() {
             if (job) {
               setBackendReport(null)
               setBackendStatus('checking')
-              setImportDetection(null)
               setFileName(file.name)
               setActiveOcrJob({
                 jobId: job.jobId,
@@ -283,7 +259,6 @@ function App() {
       const warningMessage = imported.fieldDetection.warnings.join('；')
 
       if (!imported.selectedTable || imported.importedRows.length === 0) {
-        setImportDetection(imported)
         setMessage(warningMessage || '找不到可辨識的名單資料，請確認檔案內含班級、座號與姓名。')
         return
       }
@@ -301,19 +276,11 @@ function App() {
           ? imported.importedRows.map((row) => hydrateRow(row.raw, row.rowNo, effectiveMap))
           : imported.importedRows,
       )
-      setColumnMap(effectiveMap)
-      setImportDetection(imported)
       setFileName(file.name)
       setMessage(
         imported.isOfficialStudentSource
           ? `已偵測 ${file.name} 為學生資料原始檔，共 ${imported.sourceStudents.length} 位學生，已先載入為本機校對基準。`
-          : `${buildImportMessage(
-              file.name,
-              imported.importedRows.length,
-              imported.fieldDetection.confidence,
-              imported.fieldDetection.reasons,
-              warningMessage,
-            )}${savedMap ? '（已套用先前記住的欄位對應）' : ''}`,
+          : `已讀取 ${file.name}，共 ${imported.importedRows.length} 筆資料，自動完成欄位辨識（信心 ${imported.fieldDetection.confidence}%）。${warningMessage ? ` ${warningMessage}` : ''}`,
       )
     } catch {
       setMessage('檔案讀取失敗，請確認格式為 .xlsx、.xls、.csv、.pdf 或 .docx。')
@@ -347,13 +314,6 @@ function App() {
     }
   }
 
-  function resetDatabase() {
-    setStudents(DEFAULT_STUDENTS)
-    localStorage.removeItem(STUDENT_STORAGE_KEY)
-    setDatabaseMode('demo')
-    setMessage(`已還原內建學生資料庫，共 ${DEFAULT_STUDENTS.length} 位學生。`)
-  }
-
   async function handleSignIn() {
     try {
       await signInWithGoogle()
@@ -366,61 +326,6 @@ function App() {
     await signOutFirebase()
     setUserEmail('')
     setMessage('已登出 Firebase，系統會繼續使用目前瀏覽器中的資料。')
-  }
-
-  function updateColumnMap(key: keyof ColumnMap, value: string) {
-    const next = { ...columnMap, [key]: value || undefined }
-    setColumnMap(next)
-    setRows((current) => current.map((row) => hydrateRow(row.raw, row.rowNo, next)))
-    if (importDetection?.selectedTable) rememberColumnMap(importDetection.selectedTable.headers, next)
-  }
-
-  function selectCandidateTable(candidateId: string) {
-    if (!importDetection) return
-    const next = selectImportCandidateTable(importDetection, candidateId)
-    setImportDetection(next)
-    setRows(next.importedRows)
-    setColumnMap(next.fieldDetection.columnMap)
-
-    if (next.isOfficialStudentSource) {
-      setStudents(next.sourceStudents)
-      localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(next.sourceStudents))
-      setDatabaseMode('local')
-    }
-  }
-
-  function changeHeaderRow(headerRow: number) {
-    if (!importDetection) return
-    const next = applyImportHeaderRow(importDetection, headerRow)
-    setImportDetection(next)
-    setRows(next.importedRows)
-    setColumnMap(next.fieldDetection.columnMap)
-  }
-
-  async function copyImportDiagnostics() {
-    if (!importDetection) return
-
-    const diagnostics = summarizeImportDiagnostics({
-      fileName: importDetection.fileName,
-      confidence: importDetection.fieldDetection.confidence,
-      headerRow: importDetection.selectedTable?.headerRow,
-      rowCount: importDetection.selectedTable?.rowCount ?? importDetection.importedRows.length,
-      warnings: importDetection.fieldDetection.warnings,
-    })
-
-    try {
-      await navigator.clipboard.writeText(diagnostics)
-      setMessage('已複製辨識報告，可貼給行政或資訊組長協助判讀。')
-    } catch {
-      setMessage('無法自動複製辨識報告，請確認瀏覽器剪貼簿權限。')
-    }
-  }
-
-  function downloadSample() {
-    const worksheet = XLSX.utils.json_to_sheet(SAMPLE_ROWS)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, '學生名單')
-    XLSX.writeFile(workbook, '學生名單校對範例.xlsx')
   }
 
   return (
@@ -436,6 +341,7 @@ function App() {
           </button>
         </div>
       ) : null}
+
       <header className="topbar">
         <div>
           <p className="eyebrow">桃園市龍潭區石門國民小學</p>
@@ -449,237 +355,177 @@ function App() {
           {firebaseReady ? (
             userEmail ? (
               <button type="button" className="ghost-button" onClick={handleSignOut}>
-                登出 Firebase
+                登出
               </button>
             ) : (
               <button type="button" className="ghost-button" onClick={handleSignIn}>
-                登入 Firebase
+                教師登入
               </button>
             )
           ) : (
             <span className="firebase-note">Firebase 尚未設定</span>
           )}
-          <button type="button" className="ghost-button" onClick={downloadSample}>
-            <FileSpreadsheet size={18} />
-            範例檔
-          </button>
+          {canUpdateDatabase ? (
+            <label className="ghost-button">
+              <Upload size={16} />
+              更新學生資料庫
+              <input type="file" accept=".xls,.xlsx" onChange={handleDatabaseFile} />
+            </label>
+          ) : null}
           <label className="primary-button">
             <Upload size={18} />
             上傳名單
             <input
               type="file"
-              accept=".xlsx,.xls,.csv,.pdf,.doc,.docx"
+              accept={ACCEPTED_FORMATS}
               onChange={handleFile}
             />
           </label>
         </div>
       </header>
 
-      <section className="summary-band">
-        <div className="summary-copy">
-          <span className="file-pill">{fileName}</span>
-          <h2>上傳後自動檢查名單是否正確</h2>
-          <p>{message}</p>
-          <p className="source-note">
-            資料庫來源：{databaseModeLabel(databaseMode)}，目前載入 {students.length} 位學生；校對模式：{backendModeLabel(backendStatus)}
-            {validationId ? `；紀錄編號：${validationId}` : ''}
-          </p>
-          {activeOcrJob ? (
-            <OcrJobProgress
-              job={activeOcrJob}
-              elapsedSeconds={ocrElapsedSeconds}
-              onReupload={() => {
-                setActiveOcrJob(null)
-                setBackendReport(null)
-                setBackendStatus('local')
-              }}
-            />
-          ) : null}
-        </div>
-        <div className="metric-grid" aria-label="校對統計">
-          <Metric label="通過" value={stats.pass} tone="success" />
-          <Metric label="待確認" value={stats.warning} tone="warning" />
-          <Metric label="錯誤" value={stats.error} tone="danger" />
-          <Metric label="總筆數" value={displayTotalCount} tone="neutral" />
-        </div>
-      </section>
-
-      <section className="workspace">
-        <aside className="control-panel">
-          <div>
-            <h2>欄位對應</h2>
-            <p>系統會先自動判斷欄位，若老師檔案欄名不同，可在這裡手動指定。</p>
-          </div>
-          {importDetection ? (
-            <div className={`detection-summary confidence-${confidenceTone(importDetection.fieldDetection.confidence)}`}>
-              <strong>自動辨識信心 {importDetection.fieldDetection.confidence}%</strong>
-              <span>
-                {importDetection.selectedTable?.sheetName
-                  ? `${importDetection.selectedTable.sheetName}，${headerRowLabel(importDetection.selectedTable.headerRow)}`
-                  : '尚未找到可判讀表格'}
-              </span>
-              {importDetection.fieldDetection.warnings.map((warning) => (
-                <span key={warning}>{warning}</span>
-              ))}
-            </div>
-          ) : null}
-          {importDetection ? (
-            <button type="button" className="ghost-button wide" onClick={copyImportDiagnostics}>
-              <Copy size={18} />
-              複製辨識報告
-            </button>
-          ) : null}
-          {importDetection && importDetection.candidates.length > 1 ? (
-            <CandidateSelect
-              label="偵測表格"
-              value={importDetection.selectedTable?.id}
-              candidates={importDetection.candidates}
-              onChange={selectCandidateTable}
-            />
-          ) : null}
-          {importDetection?.selectedTable?.rawRows ? (
-            <HeaderRowSelect
-              headerRow={importDetection.selectedTable.headerRow}
-              rawRows={importDetection.selectedTable.rawRows}
-              onChange={changeHeaderRow}
-            />
-          ) : null}
-          <ColumnSelect
-            label="班級欄位"
-            value={columnMap.classKey}
-            headers={headers}
-            onChange={(value) => updateColumnMap('classKey', value)}
-          />
-          <ColumnSelect
-            label="座號欄位"
-            value={columnMap.seatKey}
-            headers={headers}
-            onChange={(value) => updateColumnMap('seatKey', value)}
-          />
-          <ColumnSelect
-            label="姓名欄位"
-            value={columnMap.nameKey}
-            headers={headers}
-            onChange={(value) => updateColumnMap('nameKey', value)}
-          />
-          <div className="action-stack">
-            {canUpdateDatabase ? (
-              <label className="ghost-button wide">
-                <Upload size={18} />
-                更新學生資料庫
-                <input type="file" accept=".xls,.xlsx" onChange={handleDatabaseFile} />
-              </label>
-            ) : (
-              <p className="readonly-note">
-                您以校對權限登入，僅資訊組長可更新學生資料庫。
+      {hasData ? (
+        <>
+          <section className="summary-band">
+            <div className="summary-copy">
+              {fileName ? <span className="file-pill">{fileName}</span> : null}
+              <h2>名單校對結果</h2>
+              {message ? <p>{message}</p> : null}
+              <p className="source-note">
+                資料庫：{databaseModeLabel(databaseMode)}，共 {students.length} 位學生　校對模式：{backendModeLabel(backendStatus)}
+                {validationId ? `　紀錄編號：${validationId}` : ''}
               </p>
-            )}
-            <button type="button" className="ghost-button wide" onClick={resetDatabase}>
-              <RefreshCw size={18} />
-              還原內建資料庫
-            </button>
-          </div>
-        </aside>
+              {activeOcrJob ? (
+                <OcrJobProgress
+                  job={activeOcrJob}
+                  elapsedSeconds={ocrElapsedSeconds}
+                  onReupload={() => {
+                    setActiveOcrJob(null)
+                    setBackendReport(null)
+                    setBackendStatus('local')
+                    setFileName('')
+                    setRows([])
+                  }}
+                />
+              ) : null}
+            </div>
+            <div className="metric-grid" aria-label="校對統計">
+              <Metric label="通過" value={stats.pass} tone="success" />
+              <Metric label="待確認" value={stats.warning} tone="warning" />
+              <Metric label="錯誤" value={stats.error} tone="danger" />
+              <Metric label="總筆數" value={displayTotalCount} tone="neutral" />
+            </div>
+          </section>
 
-        <section className="table-panel">
-          <div className={`report-card report-${reportTone}`} role="status">
-            <div className="report-icon">
-              {reportTone === 'success' ? <CheckCircle2 size={28} /> : <AlertTriangle size={28} />}
-            </div>
-            <div>
-              <h2>{activeOcrJob ? ocrReportTitle(activeOcrJob) : reportTitle(stats)}</h2>
-              <p>{activeOcrJob ? ocrReportDescription(activeOcrJob) : reportDescription(stats, displayIssues.length)}</p>
-            </div>
-          </div>
-          <div className="table-toolbar">
-            <div>
-              <h2>需要老師確認的項目</h2>
-              <p>只列出可能有問題的學生；老師依提示回原始檔修正即可。</p>
-            </div>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => {
-                setRows(buildImportedRows(SAMPLE_ROWS, SAMPLE_COLUMN_MAP))
-                setColumnMap(SAMPLE_COLUMN_MAP)
-                setImportDetection(null)
-                setFileName('範例名單.xlsx')
-              }}
-            >
-              <RefreshCw size={18} />
-              重置範例
-            </button>
-          </div>
+          <section className="workspace">
+            <section className="table-panel">
+              <div className={`report-card report-${reportTone}`} role="status">
+                <div className="report-icon">
+                  {reportTone === 'success' ? <CheckCircle2 size={28} /> : <AlertTriangle size={28} />}
+                </div>
+                <div>
+                  <h2>{activeOcrJob ? ocrReportTitle(activeOcrJob) : reportTitle(stats)}</h2>
+                  <p>{activeOcrJob ? ocrReportDescription(activeOcrJob) : reportDescription(stats, displayIssues.length)}</p>
+                </div>
+              </div>
 
-          {displayIssues.length === 0 ? (
-            <div className="empty-report">
-              {activeOcrJob?.status === 'processing' || activeOcrJob?.status === 'queued' ? (
-                <>
-                  <RefreshCw size={42} />
-                  <strong>正在背景辨識掃描 PDF</strong>
-                  <span>完成後會更新校對摘要；老師可以先停留在這個畫面等待進度條跑完。</span>
-                </>
-              ) : activeOcrJob?.status === 'failed' ? (
-                <>
-                  <AlertTriangle size={42} />
-                  <strong>掃描 PDF 尚未完成校對</strong>
-                  <span>{activeOcrJob.errorMessage ?? '背景辨識失敗，請改用較清晰的 PDF，或先轉成 Excel / CSV 再上傳。'}</span>
-                </>
+              <div className="table-toolbar">
+                <div>
+                  <h2>需要老師確認的項目</h2>
+                  <p>只列出可能有問題的學生；老師依提示回原始檔修正即可。</p>
+                </div>
+              </div>
+
+              {displayIssues.length === 0 ? (
+                <div className="empty-report">
+                  {activeOcrJob?.status === 'processing' || activeOcrJob?.status === 'queued' ? (
+                    <>
+                      <RefreshCw size={42} />
+                      <strong>正在背景辨識掃描 PDF</strong>
+                      <span>完成後會更新校對摘要；老師可以先停留在這個畫面等待進度條跑完。</span>
+                    </>
+                  ) : activeOcrJob?.status === 'failed' ? (
+                    <>
+                      <AlertTriangle size={42} />
+                      <strong>掃描 PDF 尚未完成校對</strong>
+                      <span>{activeOcrJob.errorMessage ?? '背景辨識失敗，請改用較清晰的 PDF，或先轉成 Excel / CSV 再上傳。'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={42} />
+                      <strong>目前沒有發現姓名或班級座號問題</strong>
+                      <span>這份名單共 {displayTotalCount} 筆，系統比對結果皆為通過。</span>
+                    </>
+                  )}
+                </div>
               ) : (
-                <>
-                  <CheckCircle2 size={42} />
-                  <strong>目前沒有發現姓名或班級座號問題</strong>
-                  <span>這份名單共 {displayTotalCount} 筆，系統比對結果皆為通過。</span>
-                </>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>狀態</th>
+                        <th>列號</th>
+                        <th>來源</th>
+                        <th>原始班級</th>
+                        <th>原始座號</th>
+                        <th>原始姓名</th>
+                        <th>提示</th>
+                        <th>系統比對到的資料</th>
+                        <th>信心</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayIssues.map((result) => (
+                        <tr key={result.id} className={`row-${result.status}`}>
+                          <td>
+                            <StatusBadge status={result.status} />
+                          </td>
+                          <td>{result.rowNo}</td>
+                          <td>{result.sourceLabel || '—'}</td>
+                          <td>{result.classValue || '未填'}</td>
+                          <td>{result.seatNo || '未填'}</td>
+                          <td>{result.name || '未填'}</td>
+                          <td>{result.issue}</td>
+                          <td>
+                            {result.suggestion ? (
+                              <span className="suggestion">
+                                {result.suggestion.className} {result.suggestion.seatNo}號{' '}
+                                {result.suggestion.name}
+                              </span>
+                            ) : (
+                              <span className="muted">無</span>
+                            )}
+                          </td>
+                          <td>{result.confidence}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
+            </section>
+          </section>
+        </>
+      ) : (
+        <section className="upload-prompt">
+          <div className="upload-prompt__card">
+            <FileSpreadsheet size={56} className="upload-prompt__icon" />
+            <h2>請上傳老師的名單檔案</h2>
+            <p>系統會自動辨識內容，與學生資料庫比對班級、座號、姓名，找出可能 KEY 錯的資料。</p>
+            <div className="upload-prompt__formats">
+              <span>支援格式</span>
+              <code>.xlsx</code><code>.xls</code><code>.csv</code>
+              <code>.pdf</code><code>.docx</code><code>.doc</code>
             </div>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>狀態</th>
-                    <th>列號</th>
-                    <th>來源</th>
-                    <th>原始班級</th>
-                    <th>原始座號</th>
-                    <th>原始姓名</th>
-                    <th>提示</th>
-                    <th>系統比對到的資料</th>
-                    <th>信心</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayIssues.map((result) => (
-                    <tr key={result.id} className={`row-${result.status}`}>
-                      <td>
-                        <StatusBadge status={result.status} />
-                      </td>
-                      <td>{result.rowNo}</td>
-                      <td>{result.sourceLabel || '—'}</td>
-                      <td>{result.classValue || '未填'}</td>
-                      <td>{result.seatNo || '未填'}</td>
-                      <td>{result.name || '未填'}</td>
-                      <td>{result.issue}</td>
-                      <td>
-                        {result.suggestion ? (
-                          <span className="suggestion">
-                            {result.suggestion.className} {result.suggestion.seatNo}號{' '}
-                            {result.suggestion.name}
-                          </span>
-                        ) : (
-                          <span className="muted">無</span>
-                        )}
-                      </td>
-                      <td>{result.confidence}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+            {message ? <p className="upload-prompt__message">{message}</p> : null}
+            <label className="primary-button upload-prompt__btn">
+              <Upload size={20} />
+              選擇檔案上傳
+              <input type="file" accept={ACCEPTED_FORMATS} onChange={handleFile} />
+            </label>
+          </div>
         </section>
-      </section>
+      )}
 
       <footer className="site-credit">
         Made with <span aria-label="愛心" className="site-credit__heart">♥</span> by{' '}
@@ -762,82 +608,6 @@ function OcrJobProgress({
   )
 }
 
-function ColumnSelect({
-  label,
-  value,
-  headers,
-  onChange,
-}: {
-  label: string
-  value?: string
-  headers: string[]
-  onChange: (value: string) => void
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <select value={value ?? ''} onChange={(event) => onChange(event.target.value)}>
-        <option value="">尚未指定</option>
-        {headers.map((header) => (
-          <option key={header} value={header}>
-            {header}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
-
-function HeaderRowSelect({
-  headerRow,
-  rawRows,
-  onChange,
-}: {
-  headerRow: number
-  rawRows: string[][]
-  onChange: (headerRow: number) => void
-}) {
-  const preview = (cells: string[]) => cells.filter(Boolean).slice(0, 4).join('・') || '（空白列）'
-  return (
-    <label className="field">
-      <span>標題列</span>
-      <select value={headerRow} onChange={(event) => onChange(Number(event.target.value))}>
-        <option value={0}>無標題列（整份視為資料）</option>
-        {rawRows.slice(0, 12).map((cells, index) => (
-          <option key={index} value={index + 1}>
-            第 {index + 1} 列：{preview(cells)}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
-
-function CandidateSelect({
-  label,
-  value,
-  candidates,
-  onChange,
-}: {
-  label: string
-  value?: string
-  candidates: CandidateTable[]
-  onChange: (value: string) => void
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <select value={value ?? ''} onChange={(event) => onChange(event.target.value)}>
-        {candidates.map((candidate) => (
-          <option key={candidate.id} value={candidate.id}>
-            {candidateLabel(candidate)}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
-
 function StatusBadge({ status }: { status: ValidationStatus }) {
   const icon =
     status === 'pass' ? (
@@ -881,35 +651,6 @@ function parseStudentDatabase(buffer: ArrayBuffer): Student[] {
 
 function parsePrimaryExcelTable(buffer: ArrayBuffer, sourceName: string): CandidateTable | null {
   return parseExcelTables(buffer, sourceName).sort((a, b) => b.rowCount - a.rowCount)[0] ?? null
-}
-
-function buildImportMessage(fileName: string, rowCount: number, confidence: number, reasons: string[], warning?: string) {
-  const detectionNote =
-    confidence >= 85
-      ? '系統已自動完成欄位辨識。'
-      : '系統已先推測欄位，請確認左側欄位對應後再使用校對結果。'
-
-  if (confidence >= 85) {
-    return `已讀取 ${fileName}，共 ${rowCount} 筆資料。${detectionNote}${reasons.join('，')}。`
-  }
-
-  return `已讀取 ${fileName}，共 ${rowCount} 筆資料。${detectionNote}${warning ? ` ${warning}` : ''}`
-}
-
-function confidenceTone(confidence: number) {
-  if (confidence >= 85) return 'high'
-  if (confidence >= 60) return 'medium'
-  return 'low'
-}
-
-function headerRowLabel(headerRow: number) {
-  return headerRow > 0 ? `第 ${headerRow} 列作為欄位列` : '無標題列，整份視為資料'
-}
-
-function candidateLabel(candidate: CandidateTable) {
-  const sheetName = candidate.sheetName || candidate.sourceName
-  const headerPart = candidate.headerRow > 0 ? `第 ${candidate.headerRow} 列` : '無標題列'
-  return `${sheetName}，${headerPart}，${candidate.rowCount} 筆`
 }
 
 function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
@@ -983,10 +724,6 @@ function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
     issue: '查無符合學生，請確認班級、座號與姓名。',
     confidence: 0,
   }
-}
-
-function collectHeaders(rows: ImportedRow[]) {
-  return Array.from(new Set(rows.flatMap((row) => Object.keys(row.raw).filter((key) => !key.startsWith('__')))))
 }
 
 function summarize(results: ValidationResult[]) {
