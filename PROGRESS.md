@@ -29,6 +29,7 @@
 | 學生資料庫種子 | 已完成 | 已從本機學務系統匯出檔匯入 795 位學生，公開版已匿名化 | 輸出至 `src/data/students.json` |
 | 學生資料庫更新 | 已完成 | 前端可上傳新的學生資料概況 `.xls` 更新本機資料庫 | 目前暫存於瀏覽器 `localStorage` |
 | Firebase SDK | 已完成 | 已加入 Firebase 初始化、Google 登入、Firestore 讀寫服務 | 未設定 env 時會退回匿名示範模式 |
+| Firebase Functions | 已完成第一版 | 新增 `validateRosterRows` 後端校對函式，從 Firestore 讀學生資料並回傳 summary / issues | 尚待部署至正式 Firebase project |
 | Firestore 資料模型 | 已完成 | 已定義 `students`、`studentDatabaseMeta`、`admins` | 詳見 `FIREBASE_SETUP.md` |
 | Firestore 安全規則 | 已完成 | 預設拒絕；僅 `admins/{uid}` 可讀寫學生資料 | 需部署到 Firebase project |
 | GitHub Secrets 串接 | 已完成 | GitHub Actions 已可接收 `VITE_FIREBASE_*` secrets | 尚待填入正式 Firebase Web App config |
@@ -50,7 +51,7 @@
 | PDF / Word 解析 | 已完成 | 文字型 PDF（含頁碼 / 多欄）、掃描 PDF OCR、`.docx`（含合併儲存格）/ 段落、舊版 `.doc` best-effort 皆已支援 |
 | .doc / OCR 辨識品質 | 需留意 | `.doc` 為 best-effort 文字還原、OCR 需下載語言資料且對低品質掃描準確度有限，建議優先轉成 Excel / CSV |
 | 正式登入權限 | 尚未實作 | 目前是單機前端工具，尚無教師 / 行政角色登入 |
-| 正式後端資料庫 | 部分完成 | 已加入 Firebase / Firestore 架構，尚待建立 Firebase project 與 secrets |
+| 正式後端資料庫 | 部分完成 | 已加入 Firebase / Firestore / Functions 架構，尚待建立 Firebase project、secrets 與部署 |
 | 操作紀錄 | 尚未實作 | 尚未保存誰上傳、誰修正、何時下載 |
 | 產品主線 | 已重新對齊 | 正式版應以「後端辨識與比對、前端回報是否正確」為主，不以修正版下載為核心；前端第一版回報頁已落地 |
 | Excel 解析安全性 | 需改善 | 目前使用 `xlsx`，`npm audit` 顯示套件有 high severity 且暫無官方修補版 |
@@ -62,7 +63,7 @@
 |---|---|---|
 | P0 | 將 Excel 解析移到後端或替換安全套件 | 避免前端直接處理不可信檔案，降低上線風險 |
 | P0 | 建立正式後端 API 與資料庫 | 後端負責辨識、比對與回傳校對結果，前端只呈現是否正確與問題清單 |
-| P0 | 後端化檔案辨識與校對 | 前端回報頁已完成第一版，下一步讓後端負責解析檔案與比對正式學生資料庫 |
+| P0 | 後端化檔案辨識 | 後端校對函式已完成第一版；下一步把 Excel / PDF / Word 解析也搬到後端隔離環境 |
 | P1 | 擴充中文姓名校正字典 | 第一版已支援常見異體 / 形近 / 同音，後續可依石門國小實際名冊誤植回饋擴充 |
 | P1 | 增加登入與角色權限 | 區分老師、行政、系統管理員 |
 | P1 | 增加校對紀錄與下載紀錄 | 行政流程需要追蹤責任與版本 |

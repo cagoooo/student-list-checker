@@ -51,6 +51,13 @@ POST /api/validations
 GET  /api/validations/:id
 ```
 
+已落地：
+
+- Firebase Callable Function `validateRosterRows` ✅
+- 後端讀取 Firestore `students` 後比對班級、座號、姓名 ✅
+- 回傳 `summary` / `issues` 給前端結果回報頁 ✅
+- 前端在 Firebase 登入後優先呼叫後端校對，失敗時自動回退本機校對 ✅
+
 核心回傳資料應包含：
 
 - `summary`：總筆數、通過、待確認、錯誤數量，以及整份名單是否可放心使用

@@ -12,6 +12,8 @@
 - 已新增 Firebase 初始化與服務層：`src/lib/firebase.ts`
 - 已新增 Google 登入按鈕與登出流程
 - 已支援登入後從 Firestore 載入學生資料
+- 已新增 Firebase Functions 後端校對函式：`validateRosterRows`
+- 前端已支援登入後優先呼叫後端校對；若 Functions 尚未部署或失敗，會自動退回本機校對
 - 已支援上傳學務系統 `.xls` 後同步寫入 Firestore
 - 已支援超過 500 筆學生資料分批寫入
 - 已新增 Firestore Rules：`firestore.rules`
@@ -59,6 +61,42 @@
   role: "admin",
   createdAt: Timestamp
 }
+```
+
+## Firebase Functions
+
+後端程式位於：
+
+```txt
+functions/src/index.ts
+```
+
+目前已建立 callable function：
+
+```txt
+validateRosterRows
+```
+
+職責：
+
+- 驗證呼叫者必須是石門國小學校帳號
+- 從 Firestore `students` collection 讀取正式學生資料庫
+- 接收前端已辨識出的列資料（班級、座號、姓名、來源列號）
+- 在後端完成學生資料比對與中文姓名模糊校正
+- 回傳 `summary` 與 `issues`，讓前端只呈現整份名單是否正確與問題清單
+
+本機編譯：
+
+```bash
+cd functions
+npm install
+npm run build
+```
+
+部署時請使用學校帳號：
+
+```bash
+firebase --account=ipad@mail2.smes.tyc.edu.tw deploy --only functions
 ```
 
 ## 安全規則摘要
@@ -130,6 +168,7 @@ VITE_FIREBASE_PROJECT_ID=
 VITE_FIREBASE_STORAGE_BUCKET=
 VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
+VITE_FIREBASE_FUNCTIONS_REGION=asia-east1
 ```
 
 ## GitHub Secrets
@@ -143,6 +182,7 @@ VITE_FIREBASE_PROJECT_ID
 VITE_FIREBASE_STORAGE_BUCKET
 VITE_FIREBASE_MESSAGING_SENDER_ID
 VITE_FIREBASE_APP_ID
+VITE_FIREBASE_FUNCTIONS_REGION
 ```
 
 設定後 GitHub Actions 會把這些值注入前端 build。
@@ -181,7 +221,7 @@ firebaseinstallations.googleapis.com
 1. 建立 Firebase project 或指定現有 project
 2. 提供 Web App config
 3. 設定 GitHub Secrets
-4. 部署 Firestore Rules
+4. 部署 Firestore Rules 與 Functions
 5. 第一次登入後取得 Auth UID
 6. 在 Firestore 建立 `admins/{uid}`
 7. 用「更新學生資料庫」上傳學務系統匯出檔

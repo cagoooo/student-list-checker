@@ -12,6 +12,11 @@ import {
 import * as XLSX from 'xlsx'
 import studentsData from './data/students.json'
 import {
+  validateRosterRowsOnBackend,
+  type BackendValidationIssue,
+  type BackendValidationReport,
+} from './lib/backendValidation'
+import {
   checkIsAdmin,
   isFirebaseEnabled,
   loadFirebaseStudents,
@@ -62,6 +67,8 @@ function App() {
   const [rows, setRows] = useState<ImportedRow[]>(() => buildImportedRows(SAMPLE_ROWS, SAMPLE_COLUMN_MAP))
   const [columnMap, setColumnMap] = useState<ColumnMap>(() => SAMPLE_COLUMN_MAP)
   const [importDetection, setImportDetection] = useState<ImportDetectionResult | null>(null)
+  const [backendReport, setBackendReport] = useState<BackendValidationReport | null>(null)
+  const [backendStatus, setBackendStatus] = useState<'local' | 'checking' | 'ready' | 'fallback'>('local')
   const [message, setMessage] = useState(
     `已載入 ${DEFAULT_STUDENTS.length} 位學生資料，可直接測試名單檢查流程。`,
   )
@@ -74,7 +81,13 @@ function App() {
   const headers = useMemo(() => collectHeaders(rows), [rows])
   const results = useMemo(() => rows.map((row) => validateRow(row, students)), [rows, students])
   const issueResults = useMemo(() => results.filter((result) => result.status !== 'pass'), [results])
-  const stats = useMemo(() => summarize(results), [results])
+  const localStats = useMemo(() => summarize(results), [results])
+  const stats = backendReport?.summary ?? localStats
+  const displayIssues = useMemo(
+    () => (backendReport ? backendReport.issues.map(backendIssueToDisplayIssue) : issueResults),
+    [backendReport, issueResults],
+  )
+  const totalCount = backendReport?.summary.total ?? results.length
   const reportTone = stats.error > 0 ? 'danger' : stats.warning > 0 ? 'warning' : 'success'
   // Firebase 已設定時，必須具備 admin 權限才能更新資料庫；未設定 Firebase 才保留本機模式。
   const canUpdateDatabase = !firebaseReady || isAdmin
@@ -105,6 +118,41 @@ function App() {
       }
     })
   }, [firebaseReady])
+
+  useEffect(() => {
+    if (!firebaseReady || !userEmail || rows.length === 0) {
+      setBackendReport(null)
+      setBackendStatus('local')
+      return undefined
+    }
+
+    let ignore = false
+    setBackendStatus('checking')
+    validateRosterRowsOnBackend(
+      rows.map((row) => ({
+        id: row.id,
+        rowNo: row.rowNo,
+        sourceLabel: row.sourceLabel,
+        classValue: row.classValue,
+        seatNo: row.seatNo,
+        name: row.name,
+      })),
+    )
+      .then((report) => {
+        if (ignore) return
+        setBackendReport(report)
+        setBackendStatus(report ? 'ready' : 'local')
+      })
+      .catch(() => {
+        if (ignore) return
+        setBackendReport(null)
+        setBackendStatus('fallback')
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [firebaseReady, rows, userEmail])
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -317,14 +365,14 @@ function App() {
           <h2>上傳後自動檢查名單是否正確</h2>
           <p>{message}</p>
           <p className="source-note">
-            資料庫來源：{databaseModeLabel(databaseMode)}，目前載入 {students.length} 位學生
+            資料庫來源：{databaseModeLabel(databaseMode)}，目前載入 {students.length} 位學生；校對模式：{backendModeLabel(backendStatus)}
           </p>
         </div>
         <div className="metric-grid" aria-label="校對統計">
           <Metric label="通過" value={stats.pass} tone="success" />
           <Metric label="待確認" value={stats.warning} tone="warning" />
           <Metric label="錯誤" value={stats.error} tone="danger" />
-          <Metric label="總筆數" value={results.length} tone="neutral" />
+          <Metric label="總筆數" value={totalCount} tone="neutral" />
         </div>
       </section>
 
@@ -412,7 +460,7 @@ function App() {
             </div>
             <div>
               <h2>{reportTitle(stats)}</h2>
-              <p>{reportDescription(stats, issueResults.length)}</p>
+              <p>{reportDescription(stats, displayIssues.length)}</p>
             </div>
           </div>
           <div className="table-toolbar">
@@ -435,11 +483,11 @@ function App() {
             </button>
           </div>
 
-          {issueResults.length === 0 ? (
+          {displayIssues.length === 0 ? (
             <div className="empty-report">
               <CheckCircle2 size={42} />
               <strong>目前沒有發現姓名或班級座號問題</strong>
-              <span>這份名單共 {results.length} 筆，系統比對結果皆為通過。</span>
+              <span>這份名單共 {totalCount} 筆，系統比對結果皆為通過。</span>
             </div>
           ) : (
             <div className="table-wrap">
@@ -458,7 +506,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {issueResults.map((result) => (
+                  {displayIssues.map((result) => (
                     <tr key={result.id} className={`row-${result.status}`}>
                       <td>
                         <StatusBadge status={result.status} />
@@ -758,6 +806,31 @@ function summarize(results: ValidationResult[]) {
   )
 }
 
+function backendIssueToDisplayIssue(issue: BackendValidationIssue): ValidationResult {
+  return {
+    id: `backend-${issue.rowNo}-${issue.original.classValue}-${issue.original.seatNo}-${issue.original.name}`,
+    rowNo: issue.rowNo,
+    sourceLabel: issue.sourceLabel,
+    raw: {},
+    classValue: issue.original.classValue,
+    seatNo: issue.original.seatNo,
+    name: issue.original.name,
+    status: issue.status,
+    issue: issue.issue,
+    suggestion: issue.suggestion
+      ? {
+          id: `${issue.suggestion.className}-${issue.suggestion.seatNo}-${issue.suggestion.name}`,
+          grade: 0,
+          className: issue.suggestion.className,
+          classCode: normalizeClass(issue.suggestion.className),
+          seatNo: issue.suggestion.seatNo,
+          name: issue.suggestion.name,
+        }
+      : undefined,
+    confidence: issue.confidence,
+  }
+}
+
 function reportTitle(stats: Record<ValidationStatus, number>) {
   if (stats.error > 0) return '這份名單有需要修正的資料'
   if (stats.warning > 0) return '這份名單有幾筆需要老師確認'
@@ -795,6 +868,15 @@ function databaseModeLabel(mode: DatabaseMode) {
     demo: '公開匿名示範資料',
     local: '瀏覽器本機資料',
     firebase: 'Firebase 雲端資料庫',
+  }[mode]
+}
+
+function backendModeLabel(mode: 'local' | 'checking' | 'ready' | 'fallback') {
+  return {
+    local: '本機即時檢查',
+    checking: '後端校對中',
+    ready: 'Firebase 後端校對',
+    fallback: '後端暫不可用，已改用本機檢查',
   }[mode]
 }
 
