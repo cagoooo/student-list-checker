@@ -172,3 +172,57 @@ describe('horizontal multi-column sheet flattening', () => {
     })
   })
 })
+
+describe('certification matrix sheet flattening', () => {
+  it('detects class headers across columns and uses the first column as seat numbers', () => {
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([
+        ['', '請確定姓名正確無誤'],
+        ['初階認證名單', '101', '102', '201'],
+        ['1', '邱紘睿', '林柏宇', '黃沐恩'],
+        ['2', '黃宥寧', '', '何宇麒'],
+        ['3', '', '葉恒安', ''],
+      ]),
+      '初階',
+    )
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([
+        ['', '請確定姓名正確無誤'],
+        ['中階認證名單', '101', '102', '201'],
+        ['1', '', '林柏宇', '黃沐恩'],
+        ['2', '', '', '何宇麒'],
+      ]),
+      '中階',
+    )
+
+    const buffer = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
+    const tables = parseExcelTables(buffer, '閱讀認證名單.xlsx')
+    const result = buildDetectionResultFromTables('閱讀認證名單.xlsx', 'excel', tables)
+
+    expect(result.selectedTable?.id).toBe('combined-certification-matrix-2')
+    expect(result.importedRows).toHaveLength(9)
+    expect(result.importedRows[0]).toMatchObject({
+      classValue: '101',
+      seatNo: '01',
+      name: '邱紘睿',
+      sourceLabel: '初階',
+    })
+    expect(result.importedRows[2]).toMatchObject({
+      classValue: '201',
+      seatNo: '01',
+      name: '黃沐恩',
+      sourceLabel: '初階',
+    })
+    expect(result.importedRows).toContainEqual(
+      expect.objectContaining({
+        classValue: '201',
+        seatNo: '01',
+        name: '黃沐恩',
+        sourceLabel: '中階',
+      }),
+    )
+  })
+})

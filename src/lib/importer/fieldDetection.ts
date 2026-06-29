@@ -64,9 +64,18 @@ export function detectRosterFields(table: CandidateTable): FieldDetection {
     }
   })
 
-  const bestClass = best(scores, 'classScore')
-  const bestSeat = best(scores, 'seatScore')
-  const bestName = best(scores, 'nameScore')
+  const bestClass = best(
+    scores.filter((score) => score.header !== headerMap.seatKey && score.header !== headerMap.nameKey),
+    'classScore',
+  )
+  const bestSeat = best(
+    scores.filter((score) => score.header !== headerMap.classKey && score.header !== headerMap.gradeKey && score.header !== headerMap.nameKey),
+    'seatScore',
+  )
+  const bestName = best(
+    scores.filter((score) => score.header !== headerMap.classKey && score.header !== headerMap.gradeKey && score.header !== headerMap.seatKey),
+    'nameScore',
+  )
 
   // 偵測「班級座號」合併欄位（關鍵字或內容推測）
   const bestCombined = scores.slice().sort((a, b) => b.combinedScore - a.combinedScore)[0]

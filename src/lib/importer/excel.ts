@@ -161,10 +161,88 @@ export function parseExcelTables(buffer: ArrayBuffer, sourceName: string): Candi
       rawRows: sheetRows.map((row) => row.map((cell) => toText(cell))),
     }
 
-    return tryFlattenHorizontalTable(parsedTable)
+    return tryFlattenCertificationMatrix(tryFlattenHorizontalTable(parsedTable))
   })
 
-  return addCombinedClassSheetTable(tables, sourceName)
+  return addCombinedCertificationMatrixTable(addCombinedClassSheetTable(tables, sourceName), sourceName)
+}
+
+function isClassCode(value: string) {
+  return /^\d{3}$/.test(value)
+}
+
+function isSeatNo(value: string) {
+  if (!/^\d{1,2}$/.test(value)) return false
+  const seat = Number(value)
+  return seat >= 1 && seat <= 45
+}
+
+function isChineseName(value: string) {
+  return /^[\u4e00-\u9fff]{2,5}$/.test(value.replace(/\s/g, ''))
+}
+
+function tryFlattenCertificationMatrix(table: CandidateTable): CandidateTable {
+  const rawRows = table.rawRows || []
+  if (rawRows.length === 0) return table
+
+  let headerIndex = -1
+  let classColumns: { col: number; classCode: string }[] = []
+
+  rawRows.slice(0, 20).some((row, index) => {
+    const columns = row
+      .map((cell, col) => ({ col, classCode: cell.trim() }))
+      .filter(({ col, classCode }) => col > 0 && isClassCode(classCode))
+
+    if (columns.length < 3) return false
+
+    const followingRows = rawRows.slice(index + 1, index + 11)
+    const seatRows = followingRows.filter((dataRow) => isSeatNo(dataRow[0]?.trim() || '')).length
+    const nameCells = followingRows.reduce(
+      (count, dataRow) => count + columns.filter(({ col }) => isChineseName(dataRow[col]?.trim() || '')).length,
+      0,
+    )
+
+    if (seatRows < 2 || nameCells < 3) return false
+
+    headerIndex = index
+    classColumns = columns
+    return true
+  })
+
+  if (headerIndex < 0) return table
+
+  const certificationName = toText(rawRows[headerIndex][0]) || table.sheetName || ''
+  const flattenedRows: Record<string, unknown>[] = []
+
+  rawRows.slice(headerIndex + 1).forEach((row, rowOffset) => {
+    const seatVal = row[0]?.trim() || ''
+    if (!isSeatNo(seatVal)) return
+
+    classColumns.forEach(({ col, classCode }) => {
+      const nameVal = row[col]?.trim() || ''
+      if (!isChineseName(nameVal)) return
+
+      flattenedRows.push({
+        [ROW_NUMBER_KEY]: headerIndex + rowOffset + 2,
+        [SOURCE_LOCATION_KEY]: table.sheetName,
+        '班級': classCode,
+        '座號': seatVal,
+        '姓名': nameVal,
+        '認證': certificationName,
+      })
+    })
+  })
+
+  if (flattenedRows.length === 0) return table
+
+  return {
+    ...table,
+    id: `${table.sheetName}-certification-matrix`,
+    headerRow: headerIndex + 1,
+    headers: ['班級', '座號', '姓名', '認證'],
+    rows: flattenedRows,
+    rowCount: flattenedRows.length,
+  }
 }
 
 function tryFlattenHorizontalTable(table: CandidateTable): CandidateTable {
@@ -265,6 +343,24 @@ function addCombinedClassSheetTable(tables: CandidateTable[], sourceName: string
     sheetName: classSheetTables.map((table) => table.sheetName).join('、'),
     headerRow: classSheetTables[0].headerRow,
     headers: firstHeaders,
+    rows: combinedRows,
+    rowCount: combinedRows.length,
+  }
+
+  return [combinedTable, ...tables]
+}
+
+function addCombinedCertificationMatrixTable(tables: CandidateTable[], sourceName: string) {
+  const certificationTables = tables.filter((table) => table.id.endsWith('-certification-matrix'))
+  if (certificationTables.length < 2) return tables
+
+  const combinedRows = certificationTables.flatMap((table) => table.rows)
+  const combinedTable: CandidateTable = {
+    id: `combined-certification-matrix-${certificationTables.length}`,
+    sourceName,
+    sheetName: certificationTables.map((table) => table.sheetName).join('、'),
+    headerRow: certificationTables[0].headerRow,
+    headers: ['班級', '座號', '姓名', '認證'],
     rows: combinedRows,
     rowCount: combinedRows.length,
   }

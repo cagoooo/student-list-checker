@@ -431,22 +431,31 @@ async function parseRosterFile(fileName: string, buffer: Buffer) {
     const workbook = new ExcelJS.Workbook()
     const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer
     await workbook.xlsx.load(arrayBuffer)
-    const worksheet = workbook.worksheets
-      .map((sheet) => ({
-        sheet,
-        rowCount: sheet.actualRowCount,
-      }))
-      .sort((a, b) => b.rowCount - a.rowCount)[0]?.sheet
-    if (!worksheet) {
+    if (workbook.worksheets.length === 0) {
       throw new HttpsError('invalid-argument', 'Excel 檔案中找不到可讀取的工作表。')
     }
 
-    const rows: string[][] = []
-    worksheet.eachRow((row) => {
-      const values = Array.isArray(row.values) ? row.values.slice(1) : []
-      rows.push(values.map((value) => cellToText(value)))
-    })
-    return rowsToRosterRows(rows, 'xlsx' as const)
+    const sheetRows = workbook.worksheets.map((worksheet) => ({
+      sheetName: worksheet.name,
+      rows: worksheetToRows(worksheet),
+    }))
+    const matrixRows = sheetRows.flatMap(({ sheetName, rows }) => certificationMatrixToRosterRows(rows, sheetName))
+    if (matrixRows.length > 0) {
+      return {
+        fileKind: 'xlsx' as const,
+        rows: matrixRows,
+        confidence: 100,
+        warnings: [],
+      }
+    }
+
+    const worksheet = sheetRows
+      .map((sheet) => ({
+        ...sheet,
+        rowCount: sheet.rows.filter((row) => row.some((cell) => toText(cell))).length,
+      }))
+      .sort((a, b) => b.rowCount - a.rowCount)[0]
+    return rowsToRosterRows(worksheet.rows, 'xlsx' as const)
   }
   if (/\.docx$/i.test(fileName)) {
     const tableRows = await docxTableRows(buffer)
@@ -656,10 +665,23 @@ function synthesizeHeaders(rows: string[][]) {
 
 function detectColumnMap(headers: string[], rows: string[][]) {
   const headerMap = detectHeaderMap(headers)
+  const classIndex = headerMap.classIndex >= 0 ? headerMap.classIndex : bestColumn(rows, scoreClassValue, [
+    headerMap.seatIndex,
+    headerMap.nameIndex,
+  ])
+  const seatIndex = headerMap.seatIndex >= 0 ? headerMap.seatIndex : bestColumn(rows, scoreSeatValue, [
+    classIndex,
+    headerMap.nameIndex,
+  ])
+  const nameIndex = headerMap.nameIndex >= 0 ? headerMap.nameIndex : bestColumn(rows, scoreNameValue, [
+    classIndex,
+    seatIndex,
+  ])
+
   return {
-    classIndex: headerMap.classIndex >= 0 ? headerMap.classIndex : bestColumn(rows, scoreClassValue),
-    seatIndex: headerMap.seatIndex >= 0 ? headerMap.seatIndex : bestColumn(rows, scoreSeatValue),
-    nameIndex: headerMap.nameIndex >= 0 ? headerMap.nameIndex : bestColumn(rows, scoreNameValue),
+    classIndex,
+    seatIndex,
+    nameIndex,
   }
 }
 
@@ -671,11 +693,13 @@ function detectHeaderMap(headers: string[]) {
   }
 }
 
-function bestColumn(rows: string[][], scorer: (value: string) => number) {
+function bestColumn(rows: string[][], scorer: (value: string) => number, excludedIndexes: number[] = []) {
   const width = Math.max(...rows.map((row) => row.length), 0)
+  const excluded = new Set(excludedIndexes.filter((index) => index >= 0))
   let bestIndex = -1
   let bestScore = 0
   for (let index = 0; index < width; index += 1) {
+    if (excluded.has(index)) continue
     const values = rows.map((row) => columnValue(row, index)).filter(Boolean)
     if (values.length === 0) continue
     const score = values.reduce((sum, value) => sum + scorer(value), 0) / values.length
@@ -709,6 +733,79 @@ function scoreNameValue(value: string) {
 
 function columnValue(row: string[], index: number) {
   return index >= 0 ? toText(row[index]) : ''
+}
+
+function worksheetToRows(worksheet: ExcelJS.Worksheet) {
+  const rows: string[][] = []
+  worksheet.eachRow({ includeEmpty: false }, (row) => {
+    const values = Array.isArray(row.values) ? row.values.slice(1) : []
+    rows.push(values.map((value) => cellToText(value)))
+  })
+  return rows
+}
+
+function isClassCode(value: string) {
+  return /^\d{3}$/.test(value)
+}
+
+function isSeatNo(value: string) {
+  if (!/^\d{1,2}$/.test(value)) return false
+  const seat = Number(value)
+  return seat >= 1 && seat <= 45
+}
+
+function isChineseName(value: string) {
+  return /^[\u4e00-\u9fff]{2,5}$/.test(value.replace(/\s/g, ''))
+}
+
+function certificationMatrixToRosterRows(rows: string[][], sheetName: string): RosterRowInput[] {
+  let headerIndex = -1
+  let classColumns: Array<{ col: number; classCode: string }> = []
+
+  rows.slice(0, 20).some((row, index) => {
+    const columns = row
+      .map((cell, col) => ({ col, classCode: toText(cell) }))
+      .filter(({ col, classCode }) => col > 0 && isClassCode(classCode))
+
+    if (columns.length < 3) return false
+
+    const followingRows = rows.slice(index + 1, index + 11)
+    const seatRows = followingRows.filter((dataRow) => isSeatNo(toText(dataRow[0]))).length
+    const nameCells = followingRows.reduce(
+      (count, dataRow) => count + columns.filter(({ col }) => isChineseName(toText(dataRow[col]))).length,
+      0,
+    )
+
+    if (seatRows < 2 || nameCells < 3) return false
+
+    headerIndex = index
+    classColumns = columns
+    return true
+  })
+
+  if (headerIndex < 0) return []
+
+  const rosterRows: RosterRowInput[] = []
+  rows.slice(headerIndex + 1).forEach((row, rowOffset) => {
+    const seatNo = toText(row[0])
+    if (!isSeatNo(seatNo)) return
+
+    classColumns.forEach(({ col, classCode }) => {
+      const name = normalizeName(toText(row[col]))
+      if (!isChineseName(name)) return
+
+      rosterRows.push({
+        id: `${sheetName}-${headerIndex + rowOffset + 2}-${classCode}-${seatNo}`,
+        rowNo: headerIndex + rowOffset + 2,
+        sourceLabel: sheetName,
+        classValue: classCode,
+        seatNo: normalizeSeat(seatNo),
+        name,
+      })
+    })
+  })
+
+  return rosterRows
 }
 
 function cellToText(value: unknown): string {
