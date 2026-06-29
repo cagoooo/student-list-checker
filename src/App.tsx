@@ -744,59 +744,86 @@ function parsePrimaryExcelTable(buffer: ArrayBuffer, sourceName: string): Candid
   return parseExcelTables(buffer, sourceName).sort((a, b) => b.rowCount - a.rowCount)[0] ?? null
 }
 
-function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
-  if (!row.classValue || !row.seatNo || !row.name) {
+export function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
+  if (!row.name) {
     return {
       ...row,
       status: 'error',
-      issue: '缺少班級、座號或姓名，無法比對。',
+      issue: '缺少姓名，無法比對。',
       confidence: 0,
     }
   }
 
-  const classCode = normalizeClass(row.classValue)
-  const exact = students.find(
-    (student) =>
-      normalizeClass(student.className) === classCode &&
-      student.seatNo === row.seatNo &&
-      normalizeName(student.name) === row.name,
+  const normalizedRowName = normalizeName(row.name)
+  const classCode = row.classValue ? normalizeClass(row.classValue) : ''
+  const hasClass = !!classCode && classCode !== '未填'
+  const hasSeat = !!row.seatNo && row.seatNo !== '未填'
+
+  // 先在資料庫中尋找姓名完全相同的學生
+  const nameMatches = students.filter(
+    (student) => normalizeName(student.name) === normalizedRowName,
   )
 
-  if (exact) {
+  if (nameMatches.length > 0) {
+    // 先看是否有連班級、座號也完全吻合的
+    const exact = nameMatches.find(
+      (student) =>
+        (!hasClass || normalizeClass(student.className) === classCode) &&
+        (!hasSeat || student.seatNo === row.seatNo),
+    )
+
+    if (exact) {
+      const classMatches = !hasClass || normalizeClass(exact.className) === classCode
+      const seatMatches = !hasSeat || exact.seatNo === row.seatNo
+      const allProvided = hasClass && hasSeat && classMatches && seatMatches
+
+      return {
+        ...row,
+        status: 'pass',
+        issue: allProvided ? '資料完全符合。' : '姓名符合。已自動對應班級座號。',
+        suggestion: exact,
+        confidence: allProvided ? 100 : 95,
+      }
+    }
+
+    // 若姓名完全吻合但班級座號不符，挑選最可能的學生
+    let bestStudent = nameMatches[0]
+    if (nameMatches.length > 1) {
+      const classMatch = nameMatches.find(
+        (student) => normalizeClass(student.className) === classCode,
+      )
+      if (classMatch) {
+        bestStudent = classMatch
+      }
+    }
+
     return {
       ...row,
       status: 'pass',
-      issue: '資料完全符合。',
-      suggestion: exact,
-      confidence: 100,
+      issue: `姓名符合。班級/座號未填或不符已忽略（系統資料：${bestStudent.className} ${bestStudent.seatNo}號）。`,
+      suggestion: bestStudent,
+      confidence: 90,
     }
   }
 
-  const sameSeat = students.find(
-    (student) => normalizeClass(student.className) === classCode && student.seatNo === row.seatNo,
-  )
-  if (sameSeat) {
-    const nameMatch = compareChineseNames(sameSeat.name, row.name)
-    return {
-      ...row,
-      status: nameMatch.level === 'low' ? 'error' : 'warning',
-      issue: `班級與座號吻合，但姓名應為「${sameSeat.name}」（${nameMatchLabel(nameMatch.level)}：${nameMatch.reasons.join('、') || '姓名差異'}）。`,
-      suggestion: sameSeat,
-      confidence: nameMatch.confidence,
+  // 姓名未完全吻合，使用班級座號輔助
+  if (hasClass && hasSeat) {
+    const sameSeat = students.find(
+      (student) => normalizeClass(student.className) === classCode && student.seatNo === row.seatNo,
+    )
+    if (sameSeat) {
+      const nameMatch = compareChineseNames(sameSeat.name, row.name)
+      return {
+        ...row,
+        status: nameMatch.level === 'low' ? 'error' : 'warning',
+        issue: `班級與座號吻合，但姓名應為「${sameSeat.name}」（${nameMatchLabel(nameMatch.level)}：${nameMatch.reasons.join('、') || '姓名差異'}）。`,
+        suggestion: sameSeat,
+        confidence: nameMatch.confidence,
+      }
     }
   }
 
-  const sameName = students.find((student) => normalizeName(student.name) === row.name)
-  if (sameName) {
-    return {
-      ...row,
-      status: 'warning',
-      issue: '找到同名學生，但班級或座號不同。',
-      suggestion: sameName,
-      confidence: 76,
-    }
-  }
-
+  // 全局模糊姓名比對
   const fuzzy = findBestNameMatch(row.name, students)
 
   if (fuzzy && fuzzy.level !== 'low') {
@@ -812,7 +839,7 @@ function validateRow(row: ImportedRow, students: Student[]): ValidationResult {
   return {
     ...row,
     status: 'error',
-    issue: '查無符合學生，請確認班級、座號與姓名。',
+    issue: '查無符合學生，請確認姓名。',
     confidence: 0,
   }
 }

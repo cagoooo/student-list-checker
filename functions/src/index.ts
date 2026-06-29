@@ -854,38 +854,51 @@ function parseCsv(text: string) {
 
 function validateRow(row: RosterRowInput, students: Student[]): { status: ValidationStatus } | ValidationIssue {
   const normalized = normalizeRow(row)
-  if (!normalized.classValue || !normalized.seatNo || !normalized.name) {
-    return issue(row, 'error', '缺少班級、座號或姓名，無法比對。', undefined, 0)
+  if (!normalized.name) {
+    return issue(row, 'error', '缺少姓名，無法比對。', undefined, 0)
   }
 
-  const classCode = normalizeClass(normalized.classValue)
-  const exact = students.find(
-    (student) =>
-      normalizeClass(student.className) === classCode &&
-      student.seatNo === normalized.seatNo &&
-      normalizeName(student.name) === normalized.name,
-  )
-  if (exact) return { status: 'pass' }
+  const classCode = normalized.classValue ? normalizeClass(normalized.classValue) : ''
+  const hasClass = !!classCode && classCode !== '未填'
+  const hasSeat = !!normalized.seatNo && normalized.seatNo !== '未填'
 
-  const sameSeat = students.find(
-    (student) => normalizeClass(student.className) === classCode && student.seatNo === normalized.seatNo,
+  // 先在資料庫中尋找姓名完全相同的學生
+  const nameMatches = students.filter(
+    (student) => normalizeName(student.name) === normalized.name,
   )
-  if (sameSeat) {
-    const nameMatch = compareChineseNames(sameSeat.name, normalized.name)
-    return issue(
-      normalized,
-      nameMatch.level === 'low' ? 'error' : 'warning',
-      `班級與座號吻合，但姓名應為「${sameSeat.name}」（${nameMatchLabel(nameMatch.level)}：${nameMatch.reasons.join('、') || '姓名差異'}）。`,
-      sameSeat,
-      nameMatch.confidence,
+
+  if (nameMatches.length > 0) {
+    // 先看是否有連班級、座號也完全吻合的
+    const exact = nameMatches.find(
+      (student) =>
+        (!hasClass || normalizeClass(student.className) === classCode) &&
+        (!hasSeat || student.seatNo === normalized.seatNo),
     )
+
+    if (exact) return { status: 'pass' }
+
+    // 若姓名完全吻合但班級座號不符，我們也直接算通過
+    return { status: 'pass' }
   }
 
-  const sameName = students.find((student) => normalizeName(student.name) === normalized.name)
-  if (sameName) {
-    return issue(normalized, 'warning', '找到同名學生，但班級或座號不同。', sameName, 76)
+  // 姓名未完全吻合，使用班級座號輔助
+  if (hasClass && hasSeat) {
+    const sameSeat = students.find(
+      (student) => normalizeClass(student.className) === classCode && student.seatNo === normalized.seatNo,
+    )
+    if (sameSeat) {
+      const nameMatch = compareChineseNames(sameSeat.name, normalized.name)
+      return issue(
+        normalized,
+        nameMatch.level === 'low' ? 'error' : 'warning',
+        `班級與座號吻合，但姓名應為「${sameSeat.name}」（${nameMatchLabel(nameMatch.level)}：${nameMatch.reasons.join('、') || '姓名差異'}）。`,
+        sameSeat,
+        nameMatch.confidence,
+      )
+    }
   }
 
+  // 全局模糊姓名比對
   const fuzzy = findBestNameMatch(normalized.name, students)
   if (fuzzy && fuzzy.level !== 'low') {
     return issue(
@@ -897,7 +910,7 @@ function validateRow(row: RosterRowInput, students: Student[]): { status: Valida
     )
   }
 
-  return issue(normalized, 'error', '查無符合學生，請確認班級、座號與姓名。', undefined, 0)
+  return issue(normalized, 'error', '查無符合學生，請確認姓名。', undefined, 0)
 }
 
 function issue(
