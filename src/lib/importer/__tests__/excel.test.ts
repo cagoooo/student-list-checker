@@ -133,3 +133,42 @@ describe('class-coded sheets', () => {
     })
   })
 })
+
+describe('horizontal multi-column sheet flattening', () => {
+  it('detects and flattens horizontal side-by-side student sections', () => {
+    const workbook = XLSX.utils.book_new()
+    const aoa = [
+      ['學校活動名單', '', '', '', '', '', '', ''],
+      ['', '', '', '', '', '', '', ''],
+      ['', '班級：', '1年1班', '', '', '班級：', '1年2班', ''],
+      ['', '', '', '', '', '', '', ''],
+      ['編號', '座號', '姓名', '', '編號', '座號', '姓名', ''],
+      ['1', '1', '邱紘睿', '', '1', '4', '石書懿', ''],
+      ['2', '2', '黃宥寧', '', '2', '5', '陳楷澄', ''],
+    ]
+
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(aoa), '工作表1')
+    const buffer = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
+    const tables = parseExcelTables(buffer, '一年級.xlsx')
+    
+    expect(tables).toHaveLength(1)
+    const table = tables[0]
+    expect(table.headers).toEqual(['班級', '座號', '姓名'])
+    expect(table.rows).toHaveLength(4)
+    expect(table.rows[0]).toMatchObject({
+      '班級': '1年1班',
+      '座號': '1',
+      '姓名': '邱紘睿',
+    })
+    expect(table.rows[1]).toMatchObject({
+      '班級': '1年2班',
+      '座號': '4',
+      '姓名': '石書懿',
+    })
+    expect(table.rows[2]).toMatchObject({
+      '班級': '1年1班',
+      '座號': '2',
+      '姓名': '黃宥寧',
+    })
+  })
+})

@@ -150,7 +150,7 @@ export function parseExcelTables(buffer: ArrayBuffer, sourceName: string): Candi
           .some(([, value]) => toText(value) !== ''),
       )
 
-    return {
+    const parsedTable = {
       id: `${sheetName}-${headerRow}`,
       sourceName,
       sheetName,
@@ -160,9 +160,94 @@ export function parseExcelTables(buffer: ArrayBuffer, sourceName: string): Candi
       rowCount: rows.length,
       rawRows: sheetRows.map((row) => row.map((cell) => toText(cell))),
     }
+
+    return tryFlattenHorizontalTable(parsedTable)
   })
 
   return addCombinedClassSheetTable(tables, sourceName)
+}
+
+function tryFlattenHorizontalTable(table: CandidateTable): CandidateTable {
+  const rawRows = table.rawRows || []
+  if (rawRows.length === 0) return table
+
+  const nameCols: { col: number; key: string }[] = []
+  const seatCols: { col: number; key: string }[] = []
+  table.headers.forEach((header, colIdx) => {
+    const cleanHeader = header.replace(/_\d+$/, '') // 移除重複字尾
+    if (/^姓名$/.test(cleanHeader) || /^學生姓名$/.test(cleanHeader)) {
+      nameCols.push({ col: colIdx, key: header })
+    }
+    if (/^座號$/.test(cleanHeader) || /^座次$/.test(cleanHeader)) {
+      seatCols.push({ col: colIdx, key: header })
+    }
+  })
+
+  // 如果姓名欄位不多於 1 個，不進行展開
+  if (nameCols.length <= 1) return table
+
+  // 尋找工作表前幾行中所有包含班級標籤的 cells
+  const classLocators: { col: number; className: string }[] = []
+  rawRows.slice(0, 10).forEach((row) => {
+    row.forEach((cell, colIdx) => {
+      const val = cell.trim()
+      // 匹配 1年1班, 一年甲班, 101 等
+      if (/^\d年\d班$/.test(val) || /^[一二三四五六]年[一二三四五六七八九十]+班$/.test(val) || /^\d{3}$/.test(val)) {
+        classLocators.push({ col: colIdx, className: val })
+      }
+    })
+  })
+
+  const flattenedRows: Record<string, unknown>[] = []
+  const headerRow = table.headerRow || 1
+  const dataRows = rawRows.slice(headerRow)
+
+  dataRows.forEach((row, index) => {
+    const rowNo = headerRow + index + 1 // 1-based row number
+    nameCols.forEach(({ col: nameCol }) => {
+      const nameVal = row[nameCol]?.trim() || ''
+      if (!nameVal || nameVal === '姓名' || nameVal === '學生姓名') return
+
+      // 找最近的座號
+      let bestSeatCol = -1
+      let minSeatDist = Infinity
+      seatCols.forEach(({ col: seatCol }) => {
+        const dist = Math.abs(seatCol - nameCol)
+        if (dist < minSeatDist) {
+          minSeatDist = dist
+          bestSeatCol = seatCol
+        }
+      })
+      const seatVal = bestSeatCol !== -1 ? row[bestSeatCol]?.trim() || '' : ''
+
+      // 找最近的班級
+      let bestClassName = ''
+      let minClassDist = Infinity
+      classLocators.forEach((loc) => {
+        const dist = Math.abs(loc.col - nameCol)
+        if (dist < minClassDist) {
+          minClassDist = dist
+          bestClassName = loc.className
+        }
+      })
+
+      const record: Record<string, unknown> = {
+        [ROW_NUMBER_KEY]: rowNo,
+        [SOURCE_LOCATION_KEY]: table.sheetName,
+        '班級': bestClassName,
+        '座號': seatVal,
+        '姓名': nameVal,
+      }
+      flattenedRows.push(record)
+    })
+  })
+
+  return {
+    ...table,
+    headers: ['班級', '座號', '姓名'],
+    rows: flattenedRows,
+    rowCount: flattenedRows.length,
+  }
 }
 
 function addCombinedClassSheetTable(tables: CandidateTable[], sourceName: string) {
