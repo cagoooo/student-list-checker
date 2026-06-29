@@ -48,5 +48,6 @@ export function normalizeSeat(value: string) {
 }
 
 export function normalizeName(value: string) {
-  return value.replace(/\s/g, '').trim()
+  const clean = value.replace(/\s/g, '').trim()
+  return clean.replace(/\([^)]*\)/g, '').replace(/（[^）]*）/g, '')
 }

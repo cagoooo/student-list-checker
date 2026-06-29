@@ -7,6 +7,7 @@ export function buildImportedRows(data: Record<string, unknown>[], map?: ColumnM
   return data
     .map((raw, index) => hydrateRow(raw, Number(raw[ROW_NUMBER_KEY]) || index + 2, detected))
     .filter((row) => !isEmptyAccountTemplateSlot(row))
+    .filter((row) => row.name !== '')
 }
 
 // 拆解「班級座號」合併欄位，如 60501 → { classCode: '605', seatNo: '01' }

@@ -583,9 +583,10 @@ function rowsToRosterRows(rows: string[][], fileKind: 'xlsx' | 'csv' | 'docx' | 
       rowNo: (headerIndex >= 0 ? headerIndex + 2 : 1) + index,
       classValue: columnValue(row, columnMap.classIndex),
       seatNo: columnValue(row, columnMap.seatIndex),
-      name: columnValue(row, columnMap.nameIndex),
+      name: normalizeName(columnValue(row, columnMap.nameIndex)),
     }))
     .filter((row) => row.classValue || row.seatNo || row.name)
+    .filter((row) => row.name !== '')
 
   if (rosterRows.length === 0) {
     throw new HttpsError('invalid-argument', '檔案中沒有可校對的班級、座號與姓名資料。')
@@ -977,7 +978,8 @@ function normalizeSeat(value: string) {
 }
 
 function normalizeName(value: string) {
-  return value.replace(/\s/g, '').trim()
+  const clean = value.replace(/\s/g, '').trim()
+  return clean.replace(/\([^)]*\)/g, '').replace(/（[^）]*）/g, '')
 }
 
 function normalizeClass(value: string) {
