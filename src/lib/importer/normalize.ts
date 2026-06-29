@@ -49,5 +49,13 @@ export function normalizeSeat(value: string) {
 
 export function normalizeName(value: string) {
   const clean = value.replace(/\s/g, '').trim()
-  return clean.replace(/\([^)]*\)/g, '').replace(/（[^）]*）/g, '')
+  const name = clean.replace(/\([^)]*\)/g, '').replace(/（[^）]*）/g, '')
+
+  // 排除明顯非學生的非人名（如教室、課照、統計人數等）
+  if (/\d/.test(name)) return ''
+  const blackList = ['人數', '總計', '合計', '教室', '課照', '教師', '老師', '上課']
+  if (blackList.some((keyword) => name.includes(keyword))) return ''
+  if (name.length > 5 && !name.includes('·') && !name.includes('．')) return ''
+
+  return name
 }
