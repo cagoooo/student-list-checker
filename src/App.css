@@ -536,7 +536,9 @@ h2 {
 .report-danger .report-icon  { color: #9b2c24; background: #ffe2df; }
 
 .table-toolbar {
+  display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   flex-wrap: wrap;
   padding: 16px 20px;
   border-bottom: 1px solid #d9e0e8;
@@ -550,6 +552,64 @@ h2 {
 
 .table-toolbar h2 {
   font-size: 16px;
+}
+
+.issue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.issue-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #d9e0e8;
+  background: #fbfcfe;
+}
+
+.issue-controls label {
+  display: grid;
+  gap: 5px;
+  color: #526071;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.issue-controls select,
+.review-select {
+  min-height: 34px;
+  border: 1px solid #cfd8e3;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #182235;
+  font: inherit;
+  font-size: 13px;
+}
+
+.issue-controls select {
+  min-width: 118px;
+  padding: 0 32px 0 10px;
+}
+
+.toggle-control {
+  min-height: 34px;
+  display: inline-flex !important;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 7px !important;
+  padding: 0 10px;
+  border: 1px solid #cfd8e3;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #233044 !important;
+}
+
+.compact-button {
+  min-height: 34px;
+  padding: 0 12px;
 }
 
 /* ─── Table ──────────────────────────────────────────── */
@@ -607,6 +667,32 @@ tbody tr:last-child td {
 
 .row-warning td { background: #fffaf0; }
 .row-error   td { background: #fff6f5; }
+
+.group-row td {
+  padding: 9px 14px;
+  background: #eef5f3;
+  color: #1f3b35;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.group-row strong {
+  margin-right: 10px;
+}
+
+.group-row span {
+  color: #637083;
+  font-weight: 700;
+}
+
+.review-select {
+  width: 92px;
+  padding: 0 8px;
+}
+
+.review-checked td { box-shadow: inset 3px 0 0 #6aa6c8; }
+.review-fixed td { box-shadow: inset 3px 0 0 #2e8f61; }
+.review-skipped td { opacity: 0.72; }
 
 /* ─── Status badge ───────────────────────────────────── */
 .status-badge {

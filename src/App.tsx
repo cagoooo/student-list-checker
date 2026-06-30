@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
+  ClipboardList,
+  Download,
   FileSpreadsheet,
   Lock,
   LogIn,
@@ -49,7 +51,14 @@ import './App.css'
 
 const DEFAULT_STUDENTS = studentsData.students as Student[]
 const STUDENT_STORAGE_KEY = 'smes-student-database'
+const ISSUE_REVIEW_STORAGE_PREFIX = 'smes-issue-review'
 const ACCEPTED_FORMATS = '.xlsx,.xls,.csv,.pdf,.doc,.docx'
+
+type IssueSortMode = 'class' | 'source' | 'confidence' | 'row'
+type IssueStatusFilter = 'all' | 'error' | 'warning'
+type ConfidenceFilter = 'all' | 'low'
+type ReviewFilter = 'all' | 'pending' | 'checked' | 'fixed' | 'skipped'
+type ReviewStatus = Exclude<ReviewFilter, 'all'>
 
 function App() {
   const firebaseReady = isFirebaseEnabled()
@@ -67,6 +76,14 @@ function App() {
   const [updateReady, setUpdateReady] = useState(false)
   const [ocrElapsedSeconds, setOcrElapsedSeconds] = useState(0)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
+  const [issueSortMode, setIssueSortMode] = useState<IssueSortMode>('class')
+  const [issueStatusFilter, setIssueStatusFilter] = useState<IssueStatusFilter>('all')
+  const [issueClassFilter, setIssueClassFilter] = useState('all')
+  const [issueSourceFilter, setIssueSourceFilter] = useState('all')
+  const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>('all')
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
+  const [groupByClass, setGroupByClass] = useState(true)
+  const [issueReview, setIssueReview] = useState<Record<string, ReviewStatus>>({})
   const adminPanelRef = useRef<HTMLDivElement>(null)
 
   const hasData = rows.length > 0 || backendReport !== null || activeOcrJob !== null
@@ -135,16 +152,38 @@ function App() {
   const isOcrJobIncomplete = isOcrJobPending || activeOcrJob?.status === 'failed'
   const pendingOcrStats = { total: 0, pass: 0, warning: 0, error: 0, usable: false }
   const stats = activeOcrJob?.resultSummary ?? (isOcrJobIncomplete ? pendingOcrStats : backendReport?.summary ?? localStats)
-  const displayIssues = useMemo(
-    () =>
-      sortValidationIssues(
-        isOcrJobIncomplete ? [] : backendReport ? backendReport.issues.map(backendIssueToDisplayIssue) : issueResults,
-      ),
-    [backendReport, isOcrJobIncomplete, issueResults],
-  )
   const totalCount = backendReport?.summary.total ?? results.length
   const displayTotalCount = activeOcrJob?.resultSummary?.total ?? (isOcrJobIncomplete ? 0 : totalCount)
   const validationId = backendReport?.validationId ?? activeOcrJob?.resultValidationId
+  const reviewStorageKey = useMemo(
+    () => `${ISSUE_REVIEW_STORAGE_PREFIX}:${validationId || fileName || 'current'}:${displayTotalCount}`,
+    [displayTotalCount, fileName, validationId],
+  )
+  const rawDisplayIssues = useMemo(
+    () =>
+      sortValidationIssues(
+        isOcrJobIncomplete ? [] : backendReport ? backendReport.issues.map(backendIssueToDisplayIssue) : issueResults,
+        issueSortMode,
+      ),
+    [backendReport, isOcrJobIncomplete, issueResults, issueSortMode],
+  )
+  const issueClasses = useMemo(() => uniqueSorted(rawDisplayIssues.map((issue) => issue.classValue).filter(Boolean)), [rawDisplayIssues])
+  const issueSources = useMemo(
+    () => uniqueSorted(rawDisplayIssues.map((issue) => issue.sourceLabel || '').filter(Boolean)),
+    [rawDisplayIssues],
+  )
+  const displayIssues = useMemo(
+    () => filterIssues(rawDisplayIssues, {
+      status: issueStatusFilter,
+      classValue: issueClassFilter,
+      source: issueSourceFilter,
+      confidence: confidenceFilter,
+      review: reviewFilter,
+      reviewMap: issueReview,
+    }),
+    [confidenceFilter, issueClassFilter, issueReview, issueSourceFilter, issueStatusFilter, rawDisplayIssues, reviewFilter],
+  )
+  const groupedIssues = useMemo(() => groupIssuesByClass(displayIssues, groupByClass), [displayIssues, groupByClass])
   const reportTone = activeOcrJob?.status === 'failed'
     ? 'danger'
     : isOcrJobPending
@@ -155,6 +194,14 @@ function App() {
           ? 'warning'
           : 'success'
   const canUpdateDatabase = isAdmin
+
+  useEffect(() => {
+    setIssueReview(loadIssueReview(reviewStorageKey))
+  }, [reviewStorageKey])
+
+  useEffect(() => {
+    saveIssueReview(reviewStorageKey, issueReview)
+  }, [issueReview, reviewStorageKey])
 
   useEffect(() => {
     if (!isOcrJobPending) {
@@ -383,12 +430,48 @@ function App() {
     setMessage('已登出 Firebase，系統會繼續使用目前瀏覽器中的資料。')
   }
 
+  function updateIssueReview(issueId: string, status: ReviewStatus) {
+    setIssueReview((current) => ({ ...current, [issueId]: status }))
+  }
+
+  function resetIssueFilters() {
+    setIssueStatusFilter('all')
+    setIssueClassFilter('all')
+    setIssueSourceFilter('all')
+    setConfidenceFilter('all')
+    setReviewFilter('all')
+    setIssueSortMode('class')
+  }
+
+  async function copyCurrentIssues() {
+    const text = buildIssueTextReport(displayIssues, fileName)
+    try {
+      await navigator.clipboard.writeText(text)
+      setMessage(`已複製目前畫面中的 ${displayIssues.length} 筆問題清單。`)
+    } catch {
+      setMessage('瀏覽器無法直接複製，請改用匯出 CSV。')
+    }
+  }
+
+  function exportCurrentIssues() {
+    const csv = buildIssueCsv(displayIssues, issueReview)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${fileName || '名單校對'}-問題清單.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    setMessage(`已匯出目前排序與篩選後的 ${displayIssues.length} 筆問題清單。`)
+  }
+
   function handleReset() {
     setRows([])
     setFileName('')
     setBackendReport(null)
     setBackendStatus('local')
     setActiveOcrJob(null)
+    setIssueReview({})
     setMessage('')
   }
 
@@ -484,9 +567,85 @@ function App() {
               <div className="table-toolbar">
                 <div>
                   <h2>需要老師確認的項目</h2>
-                  <p>只列出可能有問題的學生；老師依提示回原始檔修正即可。</p>
+                  <p>
+                    目前顯示 {displayIssues.length} / {rawDisplayIssues.length} 筆；可依班級、來源與處理狀態快速定位。
+                  </p>
+                </div>
+                <div className="issue-actions">
+                  <button type="button" className="ghost-button" onClick={() => { void copyCurrentIssues() }} disabled={displayIssues.length === 0}>
+                    <ClipboardList size={15} />
+                    複製清單
+                  </button>
+                  <button type="button" className="ghost-button" onClick={exportCurrentIssues} disabled={displayIssues.length === 0}>
+                    <Download size={15} />
+                    匯出 CSV
+                  </button>
                 </div>
               </div>
+
+              {rawDisplayIssues.length > 0 ? (
+                <div className="issue-controls" aria-label="問題清單篩選與排序">
+                  <label>
+                    排序
+                    <select value={issueSortMode} onChange={(event) => setIssueSortMode(event.target.value as IssueSortMode)}>
+                      <option value="class">班級順序</option>
+                      <option value="source">來源順序</option>
+                      <option value="confidence">信心高低</option>
+                      <option value="row">原始列號</option>
+                    </select>
+                  </label>
+                  <label>
+                    狀態
+                    <select value={issueStatusFilter} onChange={(event) => setIssueStatusFilter(event.target.value as IssueStatusFilter)}>
+                      <option value="all">全部</option>
+                      <option value="error">錯誤</option>
+                      <option value="warning">待確認</option>
+                    </select>
+                  </label>
+                  <label>
+                    班級
+                    <select value={issueClassFilter} onChange={(event) => setIssueClassFilter(event.target.value)}>
+                      <option value="all">全部班級</option>
+                      {issueClasses.map((classValue) => (
+                        <option key={classValue} value={classValue}>{classValue}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    來源
+                    <select value={issueSourceFilter} onChange={(event) => setIssueSourceFilter(event.target.value)}>
+                      <option value="all">全部來源</option>
+                      {issueSources.map((source) => (
+                        <option key={source} value={source}>{source}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    信心
+                    <select value={confidenceFilter} onChange={(event) => setConfidenceFilter(event.target.value as ConfidenceFilter)}>
+                      <option value="all">全部</option>
+                      <option value="low">低於 80%</option>
+                    </select>
+                  </label>
+                  <label>
+                    處理
+                    <select value={reviewFilter} onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)}>
+                      <option value="all">全部</option>
+                      <option value="pending">未處理</option>
+                      <option value="checked">已確認</option>
+                      <option value="fixed">已修正</option>
+                      <option value="skipped">略過</option>
+                    </select>
+                  </label>
+                  <label className="toggle-control">
+                    <input type="checkbox" checked={groupByClass} onChange={(event) => setGroupByClass(event.target.checked)} />
+                    依班級分組
+                  </label>
+                  <button type="button" className="ghost-button compact-button" onClick={resetIssueFilters}>
+                    重設
+                  </button>
+                </div>
+              ) : null}
 
               {displayIssues.length === 0 ? (
                 <div className="empty-report">
@@ -516,6 +675,7 @@ function App() {
                     <thead>
                       <tr>
                         <th>狀態</th>
+                        <th>處理</th>
                         <th>列號</th>
                         <th>來源</th>
                         <th>原始班級</th>
@@ -527,29 +687,53 @@ function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {displayIssues.map((result) => (
-                        <tr key={result.id} className={`row-${result.status}`}>
-                          <td data-label="狀態">
-                            <StatusBadge status={result.status} />
-                          </td>
-                          <td data-label="列號">{result.rowNo}</td>
-                          <td data-label="來源">{result.sourceLabel || '—'}</td>
-                          <td data-label="班級">{result.classValue || '未填'}</td>
-                          <td data-label="座號">{result.seatNo || '未填'}</td>
-                          <td data-label="姓名">{result.name || '未填'}</td>
-                          <td data-label="提示">{result.issue}</td>
-                          <td data-label="比對結果">
-                            {result.suggestion ? (
-                              <span className="suggestion">
-                                {result.suggestion.className} {result.suggestion.seatNo}號{' '}
-                                {result.suggestion.name}
-                              </span>
-                            ) : (
-                              <span className="muted">無</span>
-                            )}
-                          </td>
-                          <td data-label="信心">{result.confidence}%</td>
-                        </tr>
+                      {groupedIssues.map((group) => (
+                        <Fragment key={group.key}>
+                          {groupByClass ? (
+                            <tr className="group-row">
+                              <td colSpan={10}>
+                                <strong>{group.label}</strong>
+                                <span>{group.issues.length} 筆</span>
+                              </td>
+                            </tr>
+                          ) : null}
+                          {group.issues.map((result) => (
+                            <tr key={result.id} className={`row-${result.status} review-${issueReview[result.id] ?? 'pending'}`}>
+                              <td data-label="狀態">
+                                <StatusBadge status={result.status} />
+                              </td>
+                              <td data-label="處理">
+                                <select
+                                  className="review-select"
+                                  value={issueReview[result.id] ?? 'pending'}
+                                  onChange={(event) => updateIssueReview(result.id, event.target.value as ReviewStatus)}
+                                >
+                                  <option value="pending">未處理</option>
+                                  <option value="checked">已確認</option>
+                                  <option value="fixed">已修正</option>
+                                  <option value="skipped">略過</option>
+                                </select>
+                              </td>
+                              <td data-label="列號">{result.rowNo}</td>
+                              <td data-label="來源">{result.sourceLabel || '—'}</td>
+                              <td data-label="班級">{result.classValue || '未填'}</td>
+                              <td data-label="座號">{result.seatNo || '未填'}</td>
+                              <td data-label="姓名">{result.name || '未填'}</td>
+                              <td data-label="提示">{result.issue}</td>
+                              <td data-label="比對結果">
+                                {result.suggestion ? (
+                                  <span className="suggestion">
+                                    {result.suggestion.className} {result.suggestion.seatNo}號{' '}
+                                    {result.suggestion.name}
+                                  </span>
+                                ) : (
+                                  <span className="muted">無</span>
+                                )}
+                              </td>
+                              <td data-label="信心">{result.confidence}%</td>
+                            </tr>
+                          ))}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
@@ -857,10 +1041,26 @@ const zhCollator = new Intl.Collator('zh-Hant-TW', { numeric: true, sensitivity:
 
 export function sortValidationIssues<T extends Pick<ValidationResult, 'status' | 'rowNo' | 'sourceLabel' | 'classValue' | 'name' | 'confidence'>>(
   issues: T[],
+  mode: IssueSortMode = 'class',
 ): T[] {
   return issues.slice().sort((left, right) => {
     const statusDiff = ISSUE_STATUS_ORDER[left.status] - ISSUE_STATUS_ORDER[right.status]
     if (statusDiff !== 0) return statusDiff
+
+    if (mode === 'confidence') {
+      const confidenceDiff = left.confidence - right.confidence
+      if (confidenceDiff !== 0) return confidenceDiff
+    }
+
+    if (mode === 'row') {
+      const rowDiff = left.rowNo - right.rowNo
+      if (rowDiff !== 0) return rowDiff
+    }
+
+    if (mode === 'source') {
+      const sourceDiff = sourceRank(left.sourceLabel) - sourceRank(right.sourceLabel)
+      if (sourceDiff !== 0) return sourceDiff
+    }
 
     const classDiff = classSortKey(left.classValue) - classSortKey(right.classValue)
     if (classDiff !== 0) return classDiff
@@ -889,6 +1089,123 @@ function sourceRank(sourceLabel?: string) {
 function classSortKey(classValue: string) {
   const classCode = normalizeClass(classValue)
   return /^\d{3}$/.test(classCode) ? Number(classCode) : 999
+}
+
+function uniqueSorted(values: string[]) {
+  return [...new Set(values)].sort((left, right) => classSortKey(left) - classSortKey(right) || zhCollator.compare(left, right))
+}
+
+function filterIssues(
+  issues: ValidationResult[],
+  filters: {
+    status: IssueStatusFilter
+    classValue: string
+    source: string
+    confidence: ConfidenceFilter
+    review: ReviewFilter
+    reviewMap: Record<string, ReviewStatus>
+  },
+) {
+  return issues.filter((issue) => {
+    if (filters.status !== 'all' && issue.status !== filters.status) return false
+    if (filters.classValue !== 'all' && issue.classValue !== filters.classValue) return false
+    if (filters.source !== 'all' && (issue.sourceLabel || '') !== filters.source) return false
+    if (filters.confidence === 'low' && issue.confidence >= 80) return false
+    const review = filters.reviewMap[issue.id] ?? 'pending'
+    if (filters.review !== 'all' && review !== filters.review) return false
+    return true
+  })
+}
+
+function groupIssuesByClass(issues: ValidationResult[], enabled: boolean) {
+  if (!enabled) return [{ key: 'all', label: '全部問題', issues }]
+  const groups = new Map<string, ValidationResult[]>()
+  issues.forEach((issue) => {
+    const label = issue.classValue || '未填班級'
+    groups.set(label, [...(groups.get(label) ?? []), issue])
+  })
+  return [...groups.entries()]
+    .map(([label, groupIssues]) => ({ key: label, label: `${label} 班`, issues: groupIssues }))
+    .sort((left, right) => classSortKey(left.key) - classSortKey(right.key) || zhCollator.compare(left.label, right.label))
+}
+
+function loadIssueReview(key: string): Record<string, ReviewStatus> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) ?? '{}')
+    if (!parsed || typeof parsed !== 'object') return {}
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, ReviewStatus] =>
+        ['pending', 'checked', 'fixed', 'skipped'].includes(String(entry[1])),
+      ),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function saveIssueReview(key: string, review: Record<string, ReviewStatus>) {
+  try {
+    localStorage.setItem(key, JSON.stringify(review))
+  } catch {
+    // localStorage 滿或被停用時，不影響校對主流程。
+  }
+}
+
+function buildIssueTextReport(issues: ValidationResult[], fileName: string) {
+  const lines = [
+    `名單校對問題清單${fileName ? `：${fileName}` : ''}`,
+    `共 ${issues.length} 筆`,
+    '',
+  ]
+  issues.forEach((issue, index) => {
+    const suggestion = issue.suggestion
+      ? `${issue.suggestion.className} ${issue.suggestion.seatNo}號 ${issue.suggestion.name}`
+      : '無'
+    lines.push(
+      `${index + 1}. 【${statusLabel(issue.status)}】${issue.classValue || '未填班級'} ${issue.seatNo || '未填座號'} ${issue.name || '未填姓名'}`,
+      `   來源：${issue.sourceLabel || '—'}，列號：${issue.rowNo}，信心：${issue.confidence}%`,
+      `   提示：${issue.issue}`,
+      `   系統比對：${suggestion}`,
+      '',
+    )
+  })
+  return lines.join('\n')
+}
+
+function buildIssueCsv(issues: ValidationResult[], review: Record<string, ReviewStatus>) {
+  const headers = ['排序', '狀態', '處理狀態', '列號', '來源', '原始班級', '原始座號', '原始姓名', '提示', '系統比對到的資料', '信心']
+  const rows = issues.map((issue, index) => {
+    const suggestion = issue.suggestion
+      ? `${issue.suggestion.className} ${issue.suggestion.seatNo}號 ${issue.suggestion.name}`
+      : ''
+    return [
+      String(index + 1),
+      statusLabel(issue.status),
+      reviewLabel(review[issue.id] ?? 'pending'),
+      String(issue.rowNo),
+      issue.sourceLabel || '',
+      issue.classValue || '',
+      issue.seatNo || '',
+      issue.name || '',
+      issue.issue,
+      suggestion,
+      `${issue.confidence}%`,
+    ]
+  })
+  return '\uFEFF' + [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n')
+}
+
+function csvCell(value: string) {
+  return `"${value.replace(/"/g, '""')}"`
+}
+
+function reviewLabel(status: ReviewStatus) {
+  return {
+    pending: '未處理',
+    checked: '已確認',
+    fixed: '已修正',
+    skipped: '略過',
+  }[status]
 }
 
 function backendIssueToDisplayIssue(issue: BackendValidationIssue): ValidationResult {
