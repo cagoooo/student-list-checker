@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateRow } from '../../../App'
+import { sortValidationIssues, validateRow } from '../../../App'
 import type { Student, ImportedRow } from '../../../types'
 
 const mockStudents: Student[] = [
@@ -118,5 +118,44 @@ describe('validateRow name-priority roster matching logic', () => {
     const result = validateRow(row, mockStudents)
     expect(result.status).toBe('error')
     expect(result.issue).toBe('缺少姓名，無法比對。')
+  })
+})
+
+describe('sortValidationIssues', () => {
+  const issue = (
+    status: 'warning' | 'error',
+    sourceLabel: string,
+    classValue: string,
+    rowNo: number,
+    name: string,
+  ) => ({
+    id: `${status}-${sourceLabel}-${classValue}-${rowNo}-${name}`,
+    rowNo,
+    sourceLabel,
+    raw: {},
+    classValue,
+    seatNo: '',
+    name,
+    status,
+    issue: '測試',
+    confidence: status === 'error' ? 0 : 72,
+  })
+
+  it('puts errors first, then groups warnings by source and class', () => {
+    const sorted = sortValidationIssues([
+      issue('warning', '初階', '105', 3, '余傑霖'),
+      issue('warning', '中階', '201', 4, '何宇麒'),
+      issue('error', '初階', '501', 5, '呂毅凡'),
+      issue('warning', '初階', '104', 12, '邱予鈞'),
+      issue('warning', '初階', '104', 11, '呂妍臻'),
+    ])
+
+    expect(sorted.map((result) => `${result.status}-${result.sourceLabel}-${result.classValue}-${result.rowNo}`)).toEqual([
+      'error-初階-501-5',
+      'warning-初階-104-11',
+      'warning-初階-104-12',
+      'warning-初階-105-3',
+      'warning-中階-201-4',
+    ])
   })
 })

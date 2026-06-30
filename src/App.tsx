@@ -136,7 +136,10 @@ function App() {
   const pendingOcrStats = { total: 0, pass: 0, warning: 0, error: 0, usable: false }
   const stats = activeOcrJob?.resultSummary ?? (isOcrJobIncomplete ? pendingOcrStats : backendReport?.summary ?? localStats)
   const displayIssues = useMemo(
-    () => (isOcrJobIncomplete ? [] : backendReport ? backendReport.issues.map(backendIssueToDisplayIssue) : issueResults),
+    () =>
+      sortValidationIssues(
+        isOcrJobIncomplete ? [] : backendReport ? backendReport.issues.map(backendIssueToDisplayIssue) : issueResults,
+      ),
     [backendReport, isOcrJobIncomplete, issueResults],
   )
   const totalCount = backendReport?.summary.total ?? results.length
@@ -836,6 +839,56 @@ function summarize(results: ValidationResult[]) {
     },
     { pass: 0, warning: 0, error: 0 },
   )
+}
+
+const ISSUE_STATUS_ORDER: Record<ValidationStatus, number> = {
+  error: 0,
+  warning: 1,
+  pass: 2,
+}
+
+const SOURCE_ORDER: Record<string, number> = {
+  初階: 0,
+  中階: 1,
+  高階: 2,
+}
+
+const zhCollator = new Intl.Collator('zh-Hant-TW', { numeric: true, sensitivity: 'base' })
+
+export function sortValidationIssues<T extends Pick<ValidationResult, 'status' | 'rowNo' | 'sourceLabel' | 'classValue' | 'name' | 'confidence'>>(
+  issues: T[],
+): T[] {
+  return issues.slice().sort((left, right) => {
+    const statusDiff = ISSUE_STATUS_ORDER[left.status] - ISSUE_STATUS_ORDER[right.status]
+    if (statusDiff !== 0) return statusDiff
+
+    const sourceDiff = sourceRank(left.sourceLabel) - sourceRank(right.sourceLabel)
+    if (sourceDiff !== 0) return sourceDiff
+
+    const classDiff = classSortKey(left.classValue) - classSortKey(right.classValue)
+    if (classDiff !== 0) return classDiff
+
+    const rowDiff = left.rowNo - right.rowNo
+    if (rowDiff !== 0) return rowDiff
+
+    const confidenceDiff = right.confidence - left.confidence
+    if (confidenceDiff !== 0) return confidenceDiff
+
+    return zhCollator.compare(left.name, right.name)
+  })
+}
+
+function sourceRank(sourceLabel?: string) {
+  const compact = (sourceLabel ?? '').replace(/\s/g, '')
+  for (const [label, rank] of Object.entries(SOURCE_ORDER)) {
+    if (compact.includes(label)) return rank
+  }
+  return 99
+}
+
+function classSortKey(classValue: string) {
+  const classCode = normalizeClass(classValue)
+  return /^\d{3}$/.test(classCode) ? Number(classCode) : 999
 }
 
 function backendIssueToDisplayIssue(issue: BackendValidationIssue): ValidationResult {

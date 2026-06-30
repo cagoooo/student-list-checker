@@ -419,7 +419,7 @@ function validateRows(rows: RosterRowInput[], students: Student[]): ValidationRe
       ...summary,
       usable: summary.error === 0 && summary.warning === 0,
     },
-    issues: results.filter((result): result is ValidationIssue => result.status !== 'pass'),
+    issues: sortValidationIssues(results.filter((result): result is ValidationIssue => result.status !== 'pass')),
   }
 }
 
@@ -638,6 +638,54 @@ function assertRows(value: unknown): RosterRowInput[] {
       name: toText(record.name),
     }
   })
+}
+
+const issueStatusOrder: Record<ValidationStatus, number> = {
+  error: 0,
+  warning: 1,
+  pass: 2,
+}
+
+const sourceOrder: Record<string, number> = {
+  初階: 0,
+  中階: 1,
+  高階: 2,
+}
+
+const zhCollator = new Intl.Collator('zh-Hant-TW', { numeric: true, sensitivity: 'base' })
+
+function sortValidationIssues<T extends ValidationIssue>(issues: T[]): T[] {
+  return issues.slice().sort((left, right) => {
+    const statusDiff = issueStatusOrder[left.status] - issueStatusOrder[right.status]
+    if (statusDiff !== 0) return statusDiff
+
+    const sourceDiff = sourceRank(left.sourceLabel) - sourceRank(right.sourceLabel)
+    if (sourceDiff !== 0) return sourceDiff
+
+    const classDiff = classSortKey(left.original.classValue) - classSortKey(right.original.classValue)
+    if (classDiff !== 0) return classDiff
+
+    const rowDiff = left.rowNo - right.rowNo
+    if (rowDiff !== 0) return rowDiff
+
+    const confidenceDiff = right.confidence - left.confidence
+    if (confidenceDiff !== 0) return confidenceDiff
+
+    return zhCollator.compare(left.original.name, right.original.name)
+  })
+}
+
+function sourceRank(sourceLabel?: string) {
+  const compact = toText(sourceLabel).replace(/\s/g, '')
+  for (const [label, rank] of Object.entries(sourceOrder)) {
+    if (compact.includes(label)) return rank
+  }
+  return 99
+}
+
+function classSortKey(classValue: string) {
+  const classCode = normalizeClass(classValue)
+  return /^\d{3}$/.test(classCode) ? Number(classCode) : 999
 }
 
 function findHeaderRow(rows: string[][]) {
