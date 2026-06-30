@@ -206,20 +206,20 @@ describe('certification matrix sheet flattening', () => {
     expect(result.importedRows).toHaveLength(9)
     expect(result.importedRows[0]).toMatchObject({
       classValue: '101',
-      seatNo: '01',
+      seatNo: '',
       name: '邱紘睿',
       sourceLabel: '初階',
     })
     expect(result.importedRows[2]).toMatchObject({
       classValue: '201',
-      seatNo: '01',
+      seatNo: '',
       name: '黃沐恩',
       sourceLabel: '初階',
     })
     expect(result.importedRows).toContainEqual(
       expect.objectContaining({
         classValue: '201',
-        seatNo: '01',
+        seatNo: '',
         name: '黃沐恩',
         sourceLabel: '中階',
       }),

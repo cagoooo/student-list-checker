@@ -72,7 +72,7 @@ describe('validateRow name-priority roster matching logic', () => {
     expect(result.issue).toBe('資料完全符合。')
   })
 
-  it('suggests correction using seat number when name is misspelled but class/seat matches', () => {
+  it('suggests correction by similar name when name is misspelled', () => {
     const row: ImportedRow = {
       id: 'row-4',
       rowNo: 4,
@@ -85,7 +85,24 @@ describe('validateRow name-priority roster matching logic', () => {
     const result = validateRow(row, mockStudents)
     expect(result.status).toBe('warning') // depending on homophone confidence
     expect(result.suggestion?.name).toBe('祝裕豐')
-    expect(result.issue).toContain('姓名應為「祝裕豐」')
+    expect(result.issue).toContain('疑似為「祝裕豐」')
+  })
+
+  it('does not let a sorting number override the closest student name', () => {
+    const row: ImportedRow = {
+      id: 'row-4b',
+      rowNo: 4,
+      classValue: '1年1班',
+      seatNo: '02',
+      name: '祝裕風',
+      raw: {},
+    }
+
+    const result = validateRow(row, mockStudents)
+    expect(result.status).toBe('warning')
+    expect(result.suggestion?.name).toBe('祝裕豐')
+    expect(result.suggestion?.name).not.toBe('林小華')
+    expect(result.issue).toContain('座號僅作輔助')
   })
 
   it('errors when name is completely missing', () => {

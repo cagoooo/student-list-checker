@@ -226,9 +226,10 @@ function tryFlattenCertificationMatrix(table: CandidateTable): CandidateTable {
         [ROW_NUMBER_KEY]: headerIndex + rowOffset + 2,
         [SOURCE_LOCATION_KEY]: table.sheetName,
         '班級': classCode,
-        '座號': seatVal,
+        '座號': '',
         '姓名': nameVal,
         '認證': certificationName,
+        '序號': seatVal,
       })
     })
   })
@@ -239,7 +240,7 @@ function tryFlattenCertificationMatrix(table: CandidateTable): CandidateTable {
     ...table,
     id: `${table.sheetName}-certification-matrix`,
     headerRow: headerIndex + 1,
-    headers: ['班級', '座號', '姓名', '認證'],
+    headers: ['班級', '座號', '姓名', '認證', '序號'],
     rows: flattenedRows,
     rowCount: flattenedRows.length,
   }
@@ -360,7 +361,7 @@ function addCombinedCertificationMatrixTable(tables: CandidateTable[], sourceNam
     sourceName,
     sheetName: certificationTables.map((table) => table.sheetName).join('、'),
     headerRow: certificationTables[0].headerRow,
-    headers: ['班級', '座號', '姓名', '認證'],
+    headers: ['班級', '座號', '姓名', '認證', '序號'],
     rows: combinedRows,
     rowCount: combinedRows.length,
   }

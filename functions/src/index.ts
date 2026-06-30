@@ -799,7 +799,7 @@ function certificationMatrixToRosterRows(rows: string[][], sheetName: string): R
         rowNo: headerIndex + rowOffset + 2,
         sourceLabel: sheetName,
         classValue: classCode,
-        seatNo: normalizeSeat(seatNo),
+        seatNo: '',
         name,
       })
     })
@@ -979,36 +979,20 @@ function validateRow(row: RosterRowInput, students: Student[]): { status: Valida
     return { status: 'pass' }
   }
 
-  // 姓名未完全吻合，使用班級座號輔助
-  if (hasClass && hasSeat) {
-    const sameSeat = students.find(
-      (student) => normalizeClass(student.className) === classCode && student.seatNo === normalized.seatNo,
-    )
-    if (sameSeat) {
-      const nameMatch = compareChineseNames(sameSeat.name, normalized.name)
-      return issue(
-        normalized,
-        nameMatch.level === 'low' ? 'error' : 'warning',
-        `班級與座號吻合，但姓名應為「${sameSeat.name}」（${nameMatchLabel(nameMatch.level)}：${nameMatch.reasons.join('、') || '姓名差異'}）。`,
-        sameSeat,
-        nameMatch.confidence,
-      )
-    }
-  }
-
-  // 全局模糊姓名比對
-  const fuzzy = findBestNameMatch(normalized.name, students)
+  // 姓名未完全吻合時，仍以姓名近似度為主；座號可能只是表格序號，避免導向錯誤學生。
+  const classStudents = hasClass ? students.filter((student) => normalizeClass(student.className) === classCode) : []
+  const fuzzy = findBestNameMatch(normalized.name, classStudents.length > 0 ? classStudents : students)
   if (fuzzy && fuzzy.level !== 'low') {
     return issue(
       normalized,
       'warning',
-      `找不到完全相符資料，疑似姓名為「${fuzzy.student.name}」（${nameMatchLabel(fuzzy.level)}：${fuzzy.reasons.join('、') || '姓名近似'}）。`,
+      `找不到完全相符姓名，疑似為「${fuzzy.student.name}」（${nameMatchLabel(fuzzy.level)}：${fuzzy.reasons.join('、') || '姓名近似'}；座號僅作輔助，未作為主要判斷）。`,
       fuzzy.student,
       fuzzy.confidence,
     )
   }
 
-  return issue(normalized, 'error', '查無符合學生，請確認姓名。', undefined, 0)
+  return issue(normalized, 'error', '查無符合姓名，請確認姓名；座號可能只是排序編號，未作為主要判斷。', undefined, 0)
 }
 
 function issue(

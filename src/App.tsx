@@ -35,7 +35,7 @@ import {
 import { detectColumns, parseExcelTables } from './lib/importer/excel'
 import { importRosterFile } from './lib/importer/importRoster'
 import { recallColumnMap } from './lib/importer/columnMemory'
-import { compareChineseNames, findBestNameMatch } from './lib/importer/nameMatch'
+import { findBestNameMatch } from './lib/importer/nameMatch'
 import {
   hydrateRow,
   normalizeClass,
@@ -806,31 +806,15 @@ export function validateRow(row: ImportedRow, students: Student[]): ValidationRe
     }
   }
 
-  // 姓名未完全吻合，使用班級座號輔助
-  if (hasClass && hasSeat) {
-    const sameSeat = students.find(
-      (student) => normalizeClass(student.className) === classCode && student.seatNo === row.seatNo,
-    )
-    if (sameSeat) {
-      const nameMatch = compareChineseNames(sameSeat.name, row.name)
-      return {
-        ...row,
-        status: nameMatch.level === 'low' ? 'error' : 'warning',
-        issue: `班級與座號吻合，但姓名應為「${sameSeat.name}」（${nameMatchLabel(nameMatch.level)}：${nameMatch.reasons.join('、') || '姓名差異'}）。`,
-        suggestion: sameSeat,
-        confidence: nameMatch.confidence,
-      }
-    }
-  }
-
-  // 全局模糊姓名比對
-  const fuzzy = findBestNameMatch(row.name, students)
+  // 姓名未完全吻合時，仍以姓名近似度為主；座號可能只是表格序號，避免導向錯誤學生。
+  const classStudents = hasClass ? students.filter((student) => normalizeClass(student.className) === classCode) : []
+  const fuzzy = findBestNameMatch(row.name, classStudents.length > 0 ? classStudents : students)
 
   if (fuzzy && fuzzy.level !== 'low') {
     return {
       ...row,
       status: 'warning',
-      issue: `找不到完全相符資料，疑似姓名為「${fuzzy.student.name}」（${nameMatchLabel(fuzzy.level)}：${fuzzy.reasons.join('、') || '姓名近似'}）。`,
+      issue: `找不到完全相符姓名，疑似為「${fuzzy.student.name}」（${nameMatchLabel(fuzzy.level)}：${fuzzy.reasons.join('、') || '姓名近似'}；座號僅作輔助，未作為主要判斷）。`,
       suggestion: fuzzy.student,
       confidence: fuzzy.confidence,
     }
@@ -839,7 +823,7 @@ export function validateRow(row: ImportedRow, students: Student[]): ValidationRe
   return {
     ...row,
     status: 'error',
-    issue: '查無符合學生，請確認姓名。',
+    issue: '查無符合姓名，請確認姓名；座號可能只是排序編號，未作為主要判斷。',
     confidence: 0,
   }
 }
