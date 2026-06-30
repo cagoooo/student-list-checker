@@ -862,11 +862,11 @@ export function sortValidationIssues<T extends Pick<ValidationResult, 'status' |
     const statusDiff = ISSUE_STATUS_ORDER[left.status] - ISSUE_STATUS_ORDER[right.status]
     if (statusDiff !== 0) return statusDiff
 
-    const sourceDiff = sourceRank(left.sourceLabel) - sourceRank(right.sourceLabel)
-    if (sourceDiff !== 0) return sourceDiff
-
     const classDiff = classSortKey(left.classValue) - classSortKey(right.classValue)
     if (classDiff !== 0) return classDiff
+
+    const sourceDiff = sourceRank(left.sourceLabel) - sourceRank(right.sourceLabel)
+    if (sourceDiff !== 0) return sourceDiff
 
     const rowDiff = left.rowNo - right.rowNo
     if (rowDiff !== 0) return rowDiff

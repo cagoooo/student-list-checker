@@ -659,11 +659,11 @@ function sortValidationIssues<T extends ValidationIssue>(issues: T[]): T[] {
     const statusDiff = issueStatusOrder[left.status] - issueStatusOrder[right.status]
     if (statusDiff !== 0) return statusDiff
 
-    const sourceDiff = sourceRank(left.sourceLabel) - sourceRank(right.sourceLabel)
-    if (sourceDiff !== 0) return sourceDiff
-
     const classDiff = classSortKey(left.original.classValue) - classSortKey(right.original.classValue)
     if (classDiff !== 0) return classDiff
+
+    const sourceDiff = sourceRank(left.sourceLabel) - sourceRank(right.sourceLabel)
+    if (sourceDiff !== 0) return sourceDiff
 
     const rowDiff = left.rowNo - right.rowNo
     if (rowDiff !== 0) return rowDiff

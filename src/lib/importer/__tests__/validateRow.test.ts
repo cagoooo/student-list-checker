@@ -141,9 +141,11 @@ describe('sortValidationIssues', () => {
     confidence: status === 'error' ? 0 : 72,
   })
 
-  it('puts errors first, then groups warnings by source and class', () => {
+  it('puts errors first, then groups warnings by class before source', () => {
     const sorted = sortValidationIssues([
       issue('warning', '初階', '105', 3, '余傑霖'),
+      issue('warning', '初階', '402', 6, '莊菀晴'),
+      issue('warning', '初階', '505', 3, '黃雨嬿'),
       issue('warning', '中階', '201', 4, '何宇麒'),
       issue('error', '初階', '501', 5, '呂毅凡'),
       issue('warning', '初階', '104', 12, '邱予鈞'),
@@ -156,6 +158,8 @@ describe('sortValidationIssues', () => {
       'warning-初階-104-12',
       'warning-初階-105-3',
       'warning-中階-201-4',
+      'warning-初階-402-6',
+      'warning-初階-505-3',
     ])
   })
 })
