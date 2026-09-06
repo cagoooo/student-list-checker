@@ -1,5 +1,7 @@
 # 學生名單校對平台
 
+> 📌 **目前版本：v1.0.0**（版本管理自 2026-09-06 起，依據 `package.json`）
+
 桃園市龍潭區石門國民小學使用的學生名單校對工具。核心目標是讓老師上傳名單後，系統自動用正確學生資料庫比對班級、座號、姓名，直接回報「整份名單是否正確」以及「哪些學生姓名可能 KEY 錯」。老師不需要下載修正版再處理一次文件。
 
 **線上 Demo**：[https://cagoooo.github.io/student-list-checker/](https://cagoooo.github.io/student-list-checker/)
