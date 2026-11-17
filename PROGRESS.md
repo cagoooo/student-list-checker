@@ -36,7 +36,7 @@
 | 修正版 Word 輸出 | ✅ 已完成（輔助） | 一鍵輸出校對後名單成 `.docx` | `src/lib/importer/exportWord.ts` |
 | 批次校正 | ✅ 已完成（輔助） | 單列套用建議或一鍵全部套用 | 非主線流程 |
 | 結果下載 | ✅ 已完成（輔助） | 匯出校對結果 Excel | 非主線流程 |
-| PWA / 版本更新 | ✅ 已完成 | Service Worker + 版本標記，有新版時自動提示更新 | `scripts/finalize-build.mjs` |
+| PWA / 版本更新 | ✅ 已完成 | Service Worker + 版本標記，有新版時自動提示更新；2026-11-17 修正離線快取只清除自己的舊快取，不再誤刪同網域其他工具的快取 | `scripts/finalize-build.mjs` |
 
 ### 後端 / Firebase
 
